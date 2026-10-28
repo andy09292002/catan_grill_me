@@ -145,12 +145,12 @@ function drawToken(ctx: Ctx, board: Board, fit: Fit, tile: Tile, view: View) {
 }
 
 function isLit(tile: Tile, view: View): boolean {
-  return view.lit !== null && tile.number === view.lit;
+  return !!view.highlight?.lit.has(tile.id);
 }
 
 /** Darkens tiles that didn't produce and rings the ones that did. */
 function drawHighlight(ctx: Ctx, board: Board, fit: Fit, view: View) {
-  if (view.lit === null) return;
+  if (!view.highlight) return;
   const { centers } = board.layout;
   ctx.fillStyle = COLORS.dim;
   board.tiles.forEach((t) => {
@@ -252,18 +252,83 @@ function drawHarbor(ctx: Ctx, fit: Fit, harbor: Harbor, view: View) {
   ctx.restore();
 }
 
+/** A red "no entry" sign over the token of a tile the thief is blocking. */
+function drawBlocked(ctx: Ctx, board: Board, fit: Fit, tile: number) {
+  const s = fit.toScreen(board.layout.centers[tile]);
+  const r = TOKEN_RADIUS * fit.scale * 1.3;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = r * 0.3;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = COLORS.blockedFill;
+  ctx.fill();
+  ctx.restore();
+  ctx.lineWidth = r * 0.2;
+  ctx.strokeStyle = COLORS.blocked;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, r * 0.9, 0, Math.PI * 2);
+  ctx.moveTo(s.x - r * 0.64, s.y - r * 0.64);
+  ctx.lineTo(s.x + r * 0.64, s.y + r * 0.64);
+  ctx.stroke();
+}
+
+/** A hooded figure below the tile's token, so the number stays readable. */
+function drawThief(ctx: Ctx, board: Board, fit: Fit, thief: NonNullable<View['thief']>) {
+  const c = fit.toScreen(board.layout.centers[thief.tile]);
+  const u = fit.scale * 1.4 * (1 + 0.12 * Math.sin(thief.pulse * Math.PI * 2));
+  const x = c.x;
+  const y = c.y + fit.scale * 0.58;
+
+  if (thief.choosing) {
+    ctx.save();
+    ctx.setLineDash([fit.scale * 0.12, fit.scale * 0.08]);
+    ctx.lineDashOffset = -thief.pulse * fit.scale;
+    ctx.strokeStyle = COLORS.litRing;
+    ctx.lineWidth = fit.scale * 0.05;
+    hexPath(ctx, fit, board.layout.centers[thief.tile], 0.9);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = u * 0.08;
+  ctx.shadowOffsetY = u * 0.02;
+  ctx.fillStyle = COLORS.thief;
+  ctx.strokeStyle = COLORS.thiefEdge;
+  ctx.lineWidth = Math.max(1, u * 0.018);
+  // Cloak
+  ctx.beginPath();
+  ctx.moveTo(x - u * 0.12, y + u * 0.17);
+  ctx.quadraticCurveTo(x - u * 0.13, y - u * 0.02, x - u * 0.06, y - u * 0.06);
+  ctx.lineTo(x + u * 0.06, y - u * 0.06);
+  ctx.quadraticCurveTo(x + u * 0.13, y - u * 0.02, x + u * 0.12, y + u * 0.17);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Hooded head
+  ctx.beginPath();
+  ctx.arc(x, y - u * 0.11, u * 0.075, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 export interface View {
   /** Degrees the board's text is turned, towards the current player. */
   textAngle: number;
-  /** The rolled number to highlight, or null for none (including after a 7). */
-  lit: number | null;
+  /** Tiles that produced on the last roll, and the one the thief blocked; null for none (including after a 7). */
+  highlight: { lit: Set<number>; blocked: Set<number> } | null;
   /** Whether the highlight ring shows; it blinks for a few seconds after a roll, then stays on. */
   flashOn: boolean;
   /** The current player's edge glow. */
   glow: { color: string; angle: number } | null;
+  /** The on-screen thief; `pulse` runs 0 to 1 while players choose where to move it. */
+  thief: { tile: number; choosing: boolean; pulse: number } | null;
 }
 
-export const PLAIN_VIEW: View = { textAngle: 0, lit: null, flashOn: false, glow: null };
+export const PLAIN_VIEW: View = { textAngle: 0, highlight: null, flashOn: false, glow: null, thief: null };
 
 /** Draws the full board to fill a canvas of the given CSS-pixel size. */
 export function drawBoard(ctx: Ctx, board: Board, width: number, height: number, view: View = PLAIN_VIEW): Fit {
@@ -274,6 +339,8 @@ export function drawBoard(ctx: Ctx, board: Board, width: number, height: number,
   board.tiles.forEach((t) => drawTile(ctx, board, fit, t));
   drawHighlight(ctx, board, fit, view);
   board.tiles.forEach((t) => drawToken(ctx, board, fit, t, view));
+  view.highlight?.blocked.forEach((tile) => drawBlocked(ctx, board, fit, tile));
+  if (view.thief) drawThief(ctx, board, fit, view.thief);
   if (view.glow) drawGlow(ctx, width, height, view.glow);
   return fit;
 }

@@ -15,14 +15,20 @@ import {
   seatAngle,
   type PlayerColor,
 } from '../game/players';
-import type { NewGameOptions } from '../game/state';
+import type { NewGameOptions, ThiefStyle } from '../game/state';
 import { el, overlay } from './dom';
 
 export interface SetupDefaults {
   colors: PlayerColor[];
   size: BoardSize;
   mode: RandomMode;
+  thiefStyle: ThiefStyle;
 }
+
+const THIEF_INFO: Record<ThiefStyle, [string, string]> = {
+  onscreen: ['On-screen thief', 'Drawn on the board. After a 7, tap a tile to move it; its tile is blocked when its number is rolled.'],
+  physical: ['Physical thief', 'Use your own thief piece. The board never responds to touch, and every matching tile lights up.'],
+};
 
 const MODE_INFO: Record<RandomMode, [string, string]> = {
   random: ['Purely random', 'Anything goes, including red numbers side by side.'],
@@ -39,6 +45,7 @@ export function openSetup(defaults: SetupDefaults, canCancel: boolean): Promise<
   let size = defaults.size;
   let sizeOverridden = size !== boardSizeForPlayers(colors.length);
   let mode = defaults.mode;
+  let thiefStyle = defaults.thiefStyle;
   let firstSeat: number | 'random' = 'random';
 
   return overlay<NewGameOptions | null>((done) => {
@@ -52,6 +59,7 @@ export function openSetup(defaults: SetupDefaults, canCancel: boolean): Promise<
         section('First player', firstRow()),
         section('Board', sizeRow()),
         section('Random mode', modeRow(), el('p', { class: 'hint' }, MODE_INFO[mode][1])),
+        section('Thief', thiefRow(), el('p', { class: 'hint' }, THIEF_INFO[thiefStyle][1])),
         el('div', { class: 'actions' }, canCancel && action('Cancel', 'secondary', () => done(null)), action('Start game', 'primary', start)),
       );
     };
@@ -63,6 +71,7 @@ export function openSetup(defaults: SetupDefaults, canCancel: boolean): Promise<
         size,
         mode,
         seed: randomSeed(),
+        thiefStyle,
       });
 
     const playersRow = () =>
@@ -137,6 +146,15 @@ export function openSetup(defaults: SetupDefaults, canCancel: boolean): Promise<
         })),
       );
 
+    const thiefRow = () =>
+      segmented(
+        (Object.keys(THIEF_INFO) as ThiefStyle[]).map((t) => ({
+          label: THIEF_INFO[t][0],
+          selected: t === thiefStyle,
+          onClick: () => ((thiefStyle = t), render()),
+        })),
+      );
+
     render();
     return dialog;
   });
@@ -174,4 +192,9 @@ function action(label: string, kind: string, onClick: () => void) {
   return b;
 }
 
-export const FIRST_LAUNCH_DEFAULTS: SetupDefaults = { colors: PLAYER_COLORS.slice(0, 4), size: 19, mode: 'balanced' };
+export const FIRST_LAUNCH_DEFAULTS: SetupDefaults = {
+  colors: PLAYER_COLORS.slice(0, 4),
+  size: 19,
+  mode: 'balanced',
+  thiefStyle: 'onscreen',
+};

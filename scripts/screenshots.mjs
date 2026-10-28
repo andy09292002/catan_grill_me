@@ -53,6 +53,24 @@ try {
     await page.waitForTimeout(3300);
     await shot(page, `${screen.name}-19hex-rolled-8.png`);
 
+    // Thief: choosing a tile, then the thief on the centre tile blocking its number.
+    await page.goto(`${url}?size=19&mode=balanced&seed=12345&players=3`);
+    await page.click('#move-thief');
+    await page.waitForTimeout(300);
+    await shot(page, `${screen.name}-19hex-thief-choosing.png`);
+    // The centre tile sits at the centre of the screen; if the thief is already there, use its right neighbour.
+    const centre = await page.evaluate(() => window.hexBoard.game.board.tiles[9]);
+    const x = screen.width / 2 + (centre.terrain === 'desert' ? screen.height * 0.168 : 0);
+    await page.mouse.click(x, screen.height / 2);
+    const number = await page.evaluate(() => {
+      const g = window.hexBoard.game;
+      return g.board.tiles[g.thiefTile].number;
+    });
+    await page.click('#pad-open');
+    await page.click(`.pad-key >> text="${number}"`);
+    await page.waitForTimeout(3300);
+    await shot(page, `${screen.name}-19hex-thief-blocks-${number}.png`);
+
     await context.close();
   }
 } finally {

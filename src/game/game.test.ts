@@ -3,7 +3,18 @@ import { generateBoard, restoreBoard, saveBoard } from '../board/generate';
 import { createRng } from '../board/rng';
 import { probability, rollDice } from './dice';
 import { defaultColors, nextFreeColor, seatAngle, seatDirection, seatEdge, type PlayerColor } from './players';
-import { createGame, currentAngle, HISTORY_LIMIT, nextTurn, recordRoll, rollCounts, type GameState } from './state';
+import {
+  createGame,
+  currentAngle,
+  HISTORY_LIMIT,
+  moveThief,
+  nextTurn,
+  production,
+  recordRoll,
+  rollCounts,
+  type GameState,
+  type ThiefStyle,
+} from './state';
 import { loadGame, saveGame, STORAGE_KEY } from './storage';
 
 function memoryStore() {
@@ -16,8 +27,8 @@ function memoryStore() {
   };
 }
 
-const newGame = (players = 3, firstSeat = 0): GameState =>
-  createGame({ colors: defaultColors(players), firstSeat, size: 19, mode: 'balanced', seed: 99 });
+const newGame = (players = 3, firstSeat = 0, thiefStyle: ThiefStyle = 'onscreen'): GameState =>
+  createGame({ colors: defaultColors(players), firstSeat, size: 19, mode: 'balanced', seed: 99, thiefStyle });
 
 describe('dice', () => {
   it('rolls each total with the expected frequency', () => {
@@ -121,6 +132,46 @@ describe('turns', () => {
   });
 });
 
+describe('thief', () => {
+  const numbered = (g: GameState, n: number) => g.board.tiles.flatMap((t, id) => (t.number === n ? [id] : []));
+
+  it('starts the on-screen thief on the desert, and tracks nothing for a physical thief', () => {
+    const onscreen = newGame();
+    expect(onscreen.board.tiles[onscreen.thiefTile!].terrain).toBe('desert');
+    expect(newGame(3, 0, 'physical').thiefTile).toBeNull();
+    const big = createGame({ colors: defaultColors(5), firstSeat: 0, size: 30, mode: 'balanced', seed: 3, thiefStyle: 'onscreen' });
+    expect(big.board.tiles[big.thiefTile!].terrain).toBe('desert');
+  });
+
+  it('moves only to a different tile on the board, and never a physical thief', () => {
+    const game = newGame();
+    const target = numbered(game, 8)[0];
+    expect(moveThief(game, target).thiefTile).toBe(target);
+    expect(moveThief(game, game.thiefTile!)).toBe(game);
+    expect(moveThief(game, -1)).toBe(game);
+    expect(moveThief(game, 19)).toBe(game);
+    const physical = newGame(3, 0, 'physical');
+    expect(moveThief(physical, target)).toBe(physical);
+  });
+
+  it('blocks the thief tile and lights the other matching tiles', () => {
+    let game = newGame();
+    const eights = numbered(game, 8);
+    expect(eights).toHaveLength(2);
+    expect(production(game, 8)).toEqual({ lit: new Set(eights), blocked: new Set() });
+
+    game = moveThief(game, eights[0]);
+    expect(production(game, 8)).toEqual({ lit: new Set([eights[1]]), blocked: new Set([eights[0]]) });
+    expect(production(game, 7)).toEqual({ lit: new Set(), blocked: new Set() });
+  });
+
+  it('lights every matching tile with a physical thief', () => {
+    const game = newGame(3, 0, 'physical');
+    expect(production(game, 6).lit.size).toBe(2);
+    expect(production(game, 6).blocked.size).toBe(0);
+  });
+});
+
 describe('saving', () => {
   it('restores exactly the same game', () => {
     const store = memoryStore();
@@ -150,12 +201,25 @@ describe('saving', () => {
       store.setItem(STORAGE_KEY, JSON.stringify(copy));
       return loadGame(store);
     };
-    expect(tamper((g) => ((g as { version: number }).version = 2))).toBeNull();
+    expect(tamper((g) => ((g as { version: number }).version = 3))).toBeNull();
     expect(tamper((g) => (g.current = 3))).toBeNull();
     expect(tamper((g) => (g.colors = ['red', 'red', 'blue']))).toBeNull();
     expect(tamper((g) => g.board.tiles.pop())).toBeNull();
     expect(tamper((g) => (g.history = [{ total: 8, dice: [1, 1] }]))).toBeNull();
+    expect(tamper((g) => (g.thiefTile = 19))).toBeNull();
+    expect(tamper((g) => (g.thiefStyle = 'physical'))).toBeNull();
+    expect(tamper((g) => (g.thiefStyle = 'invisible' as ThiefStyle))).toBeNull();
     expect(tamper(() => {})).toEqual(game);
+  });
+
+  it('carries a Milestone 3 save forward with the thief on the desert', () => {
+    const store = memoryStore();
+    const game = recordRoll(newGame(4, 2), { total: 5, dice: [2, 3] });
+    const { thiefStyle: _style, thiefTile: _tile, ...rest } = game;
+    store.setItem(STORAGE_KEY, JSON.stringify({ ...rest, version: 1 }));
+    const loaded = loadGame(store);
+    expect(loaded).toEqual({ ...game, thiefStyle: 'onscreen' });
+    expect(loaded!.board.tiles[loaded!.thiefTile!].terrain).toBe('desert');
   });
 
   it('keeps playing when storage throws', () => {

@@ -1,6 +1,6 @@
 # Hex Board
 
-A touch-screen board companion for a hex-tile resource-trading board game you own. It draws a random board on a portable touch monitor lying flat on the table, and players put their physical pieces on top. The game itself is played with the physical components; the app handles the board, dice, turns and saving (and later the thief).
+A touch-screen board companion for a hex-tile resource-trading board game you own. It draws a random board on a portable touch monitor lying flat on the table, and players put their physical pieces on top. The game itself is played with the physical components; the app handles the board, dice, turns, the thief and saving.
 
 The full design and every decision behind it are in [grillMe.md](grillMe.md).
 
@@ -10,8 +10,8 @@ The full design and every decision behind it are in [grillMe.md](grillMe.md).
 |---|---|---|
 | 1 | Board: 19 and 30 hexes, three random modes, harbors, number tokens | Done |
 | 2 | Publish to GitHub Pages and install on the PC | Done |
-| 3 | Game flow: New game screen, dice, turns, text rotation, saving | In progress |
-| 4 | Thief | Planned |
+| 3 | Game flow: New game screen, dice, turns, text rotation, saving | Done |
+| 4 | Thief | In progress |
 | 5 | Animation | Planned |
 
 ## Install it
@@ -37,14 +37,15 @@ Open the printed URL, drag the browser window onto the touch monitor and press F
 
 ## Playing
 
-- **New game** (top right): players, seat colors, first player, board size and random mode. Starting a new game over one in progress asks first.
-- **Roll** (bottom right) rolls two dice; **Enter** next to it takes a total from physical dice. Matching tiles flash, then stay lit until the next roll. A 7 shows a reminder to move the thief.
+- **New game** (top right): players, seat colors, first player, board size, random mode and thief style. Starting a new game over one in progress asks first.
+- **Roll** (bottom right) rolls two dice; **Enter** next to it takes a total from physical dice. Matching tiles flash, then stay lit until the next roll. A 7 starts moving the thief (or, with a physical thief, shows a reminder).
 - **Next turn** (bottom left) passes to the next seat clockwise. Numbers, harbor labels and the corner controls turn to face whoever's turn it is, and their side of the screen glows in their color.
 - **Last roll** (top left) shows the latest roll and the ones before it.
+- **Thief.** With the on-screen thief (the default), it starts on the desert. After a 7, or when you tap **Thief** (top right), tap a tile to move it there, or **Cancel**. When its tile's number is rolled, that tile shows a red blocking sign instead of lighting up. With a physical thief, the board never responds to touch and every matching tile lights up.
 - The game saves after every change and comes back after a refresh, a restart or closing the app.
 - On a PC keyboard, **R** rolls and **N** passes the turn.
 
-A URL like `?size=30&mode=balancedPlus&seed=12345&players=5` opens a fixed board for testing or sharing without touching the saved game. Modes are `random`, `balanced` and `balancedPlus`.
+A URL like `?size=30&mode=balancedPlus&seed=12345&players=5&thief=physical` opens a fixed board for testing or sharing without touching the saved game. Modes are `random`, `balanced` and `balancedPlus`.
 
 ## Check it
 
@@ -54,7 +55,7 @@ npm run build
 npm run screenshots
 ```
 
-`npm run screenshots` needs a build first. It saves the New game screen, both boards and a mid-game roll at 1920×1080, 1366×768, 2560×1440 and 1024×768 into `screenshots/`, using the installed Microsoft Edge. CI runs the tests and screenshots on every push and uploads the screenshots as a build artifact.
+`npm run screenshots` needs a build first. It saves the New game screen, both boards, a mid-game roll, and the thief being moved and blocking a tile at 1920×1080, 1366×768, 2560×1440 and 1024×768 into `screenshots/`, using the installed Microsoft Edge. CI runs the tests and screenshots on every push and uploads the screenshots as a build artifact.
 
 Merging into `main` deploys to GitHub Pages, but only if the tests pass.
 

@@ -1,7 +1,7 @@
 import { CONTENTS, type SavedBoard } from '../board/generate';
 import { buildLayout } from '../board/layout';
 import { MAX_PLAYERS, MIN_PLAYERS, PLAYER_COLORS } from './players';
-import type { GameState, Roll } from './state';
+import { thiefStartTile, type GameState, type Roll } from './state';
 
 export const STORAGE_KEY = 'hex-board/game';
 
@@ -28,11 +28,19 @@ export function loadGame(store: KeyValueStore | null = defaultStore()): GameStat
   try {
     const raw = store?.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const state: unknown = JSON.parse(raw);
+    const state = migrate(JSON.parse(raw));
     return isGameState(state) ? state : null;
   } catch {
     return null;
   }
+}
+
+/** Version 1 saves (Milestone 3) had no thief; they continue with the on-screen thief on the desert. */
+function migrate(s: unknown): unknown {
+  if (typeof s !== 'object' || s === null || (s as { version?: unknown }).version !== 1) return s;
+  const v1 = s as Omit<GameState, 'version' | 'thiefStyle' | 'thiefTile'>;
+  if (!isSavedBoard(v1.board)) return s;
+  return { ...v1, version: 2, thiefStyle: 'onscreen', thiefTile: thiefStartTile(v1.board) };
 }
 
 export function clearGame(store: KeyValueStore | null = defaultStore()): void {
@@ -77,7 +85,7 @@ function isGameState(s: unknown): s is GameState {
   const g = s as GameState;
   const players = Array.isArray(g.colors) ? g.colors.length : 0;
   return (
-    g.version === 1 &&
+    g.version === 2 &&
     isSavedBoard(g.board) &&
     players >= MIN_PLAYERS &&
     players <= MAX_PLAYERS &&
@@ -88,6 +96,9 @@ function isGameState(s: unknown): s is GameState {
     isInt(g.turn, 1, Number.MAX_SAFE_INTEGER) &&
     (g.lastRoll === null || isRoll(g.lastRoll)) &&
     Array.isArray(g.history) &&
-    g.history.every(isRoll)
+    g.history.every(isRoll) &&
+    (g.thiefStyle === 'physical'
+      ? g.thiefTile === null
+      : g.thiefStyle === 'onscreen' && isInt(g.thiefTile, 0, g.board.tiles.length - 1))
   );
 }
