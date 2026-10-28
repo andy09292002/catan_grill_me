@@ -17,6 +17,12 @@ export const ICON_SPOTS: Point[] = [
   { x: 0.42, y: 0.46 },
 ];
 
+/** A spot turned about the tile centre by `deg` degrees, clockwise on screen. */
+export function turnSpot(spot: Point, deg: number): Point {
+  const a = (deg * Math.PI) / 180;
+  return { x: spot.x * Math.cos(a) - spot.y * Math.sin(a), y: spot.x * Math.sin(a) + spot.y * Math.cos(a) };
+}
+
 /** The spot where hills and mountains show a worker digging instead of their usual icon. */
 export const WORKER_SPOT = 3;
 
@@ -214,7 +220,8 @@ function drawWorker(ctx: Ctx, terrain: 'hills' | 'mountain', x: number, y: numbe
 
 /**
  * Draws the icon at one spot of a tile, moving as `level` allows. `f` scales icon pixels to
- * screen pixels; `room` limits how far a wandering sheep may stray.
+ * screen pixels. `windX` is the spot's position across the screen, so wheat waves travel
+ * across the board however each tile's art is turned.
  */
 export function drawTerrainIcon(
   ctx: Ctx,
@@ -226,6 +233,7 @@ export function drawTerrainIcon(
   f: number,
   t: number,
   level: AnimationLevel,
+  windX = x,
 ) {
   const phase = phaseFor(tile, spot);
   if ((terrain === 'hills' || terrain === 'mountain') && spot === WORKER_SPOT) {
@@ -238,7 +246,7 @@ export function drawTerrainIcon(
       return;
     case 'field':
       // Wheat waves follow the wind across the board, so phase follows position.
-      drawSwaying(ctx, 'field', x, y, f, sway(t, x * 0.0012 + phase * 0.25, level, WHEAT_SWAY_DEG));
+      drawSwaying(ctx, 'field', x, y, f, sway(t, windX * 0.0012 + phase * 0.25, level, WHEAT_SWAY_DEG));
       return;
     case 'pasture': {
       const m = sheepWander(t, phase, level, roomAt(ICON_SPOTS[spot], ICON_RADIUS.pasture));

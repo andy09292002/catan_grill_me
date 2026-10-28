@@ -13,6 +13,7 @@ import {
   sway,
   TOKEN_CLEARANCE,
   TREE_SWAY_DEG,
+  turnSpot,
   WHEAT_SWAY_DEG,
   WORKER_SPOT,
 } from './animate';
@@ -33,6 +34,21 @@ describe('icon spots', () => {
         expect(d - r, `${terrain} at spot ${i} covers the token`).toBeGreaterThanOrEqual(TOKEN_CLEARANCE);
       }
     });
+  });
+
+  it('stay just as clear of corners, edges and the token when the art turns toward any seat', () => {
+    // Seat angles for 2 to 6 players, plus angles passed through mid-turn.
+    const angles = [0, 60, 72, 90, 120, 144, 180, 216, 240, 270, 288, 300, 33, 199];
+    const radius = Math.max(...Object.values(ICON_RADIUS)) / ICON_UNITS;
+    for (const spot of ICON_SPOTS) {
+      for (const deg of angles) {
+        const p = turnSpot(spot, deg);
+        expect(Math.hypot(p.x, p.y)).toBeCloseTo(Math.hypot(spot.x, spot.y), 10);
+        expect(Math.hypot(p.x, p.y) - radius).toBeGreaterThanOrEqual(TOKEN_CLEARANCE);
+      }
+    }
+    expect(turnSpot({ x: 0, y: 1 }, 90).x).toBeCloseTo(-1);
+    expect(turnSpot({ x: 0, y: 1 }, 180).y).toBeCloseTo(-1);
   });
 });
 

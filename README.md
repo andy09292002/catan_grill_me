@@ -12,7 +12,7 @@ The full design and every decision behind it are in [grillMe.md](grillMe.md).
 | 2 | Publish to GitHub Pages and install on the PC | Done |
 | 3 | Game flow: New game screen, dice, turns, text rotation, saving | Done |
 | 4 | Thief | Done |
-| 5 | Animation | In progress |
+| 5 | Animation | Done |
 
 ## Install it
 
@@ -42,7 +42,7 @@ Open the printed URL, drag the browser window onto the touch monitor and press F
 - **Next turn** (bottom left) passes to the next seat clockwise. Numbers, harbor labels and the corner controls turn to face whoever's turn it is, and their side of the screen glows in their color.
 - **Last roll** (top left) shows the latest roll and the ones before it.
 - **Thief.** With the on-screen thief (the default), it starts on the desert. After a 7, or when you tap **Thief** (top right), tap a tile to move it there, or **Cancel**. When its tile's number is rolled, that tile shows a red blocking sign instead of lighting up. With a physical thief, the board never responds to touch and every matching tile lights up.
-- **Animation.** Sheep wander their pastures, wheat and trees sway in the wind, and workers dig in the hills and mountains, all kept clear of tile corners, edges and number tokens so nothing moves under a piece. **Full** (the default), **Calm** (gentle swaying at about 30 fps) or **Off** (a still board) is set on the New game screen and applies right away. If a device can't keep up with Full, the app eases to Calm by itself.
+- **Animation.** Sheep wander their pastures, wheat and trees sway in the wind, and workers dig in the hills and mountains, all kept clear of tile corners, edges and number tokens so nothing moves under a piece. Like the text, each tile's art and the thief turn to face the current player. **Full** (the default), **Calm** (gentle swaying at about 30 fps) or **Off** (a still board) is set on the New game screen and applies right away. If a device can't keep up with Full, the app eases to Calm by itself.
 - The game saves after every change and comes back after a refresh, a restart or closing the app.
 - On a PC keyboard, **R** rolls and **N** passes the turn.
 
