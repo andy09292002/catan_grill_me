@@ -1,0 +1,100 @@
+:root {
+  --control-size: clamp(56px, 8vmin, 104px);
+  --corner-gap: clamp(10px, 2vmin, 28px);
+  --panel: rgba(11, 26, 43, 0.82);
+  --panel-edge: rgba(143, 176, 208, 0.35);
+  --ink: #f4e7c5;
+  --ink-muted: #8fb0d0;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0a1626;
+  font-family: system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
+  /* The board is a play surface: no text selection, callouts, zoom or scroll on touch. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+
+#board {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: block;
+}
+
+.corner {
+  position: fixed;
+  display: flex;
+  gap: 10px;
+  padding: var(--corner-gap);
+}
+.top-left {
+  top: 0;
+  left: 0;
+}
+.top-right {
+  top: 0;
+  right: 0;
+}
+.bottom-left {
+  bottom: 0;
+  left: 0;
+}
+.bottom-right {
+  bottom: 0;
+  right: 0;
+}
+
+.title {
+  color: var(--ink);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-size: clamp(14px, 2vmin, 24px);
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: var(--control-size);
+  min-height: var(--control-size);
+  padding: 8px 12px;
+  border-radius: 18px;
+  border: 1.5px solid var(--panel-edge);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: clamp(11px, 1.5vmin, 16px);
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.control:active {
+  transform: scale(0.96);
+}
+.control svg {
+  width: calc(var(--control-size) * 0.4);
+  height: calc(var(--control-size) * 0.4);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
