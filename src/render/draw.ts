@@ -3,7 +3,7 @@ import { RED_NUMBERS } from '../board/generate';
 import { corner, type Point } from '../board/layout';
 import type { AnimationLevel } from '../game/prefs';
 import { seatEdge } from '../game/players';
-import { drawTerrainIcon, ICON_SPOTS, ICON_UNITS } from './animate';
+import { drawTerrainIcon, ICON_SPOTS, ICON_UNITS, turnSpot } from './animate';
 import { COLORS, drawIcon, harborLabel, TERRAIN_COLORS } from './art';
 import { fitBoard, type Fit } from './fit';
 
@@ -82,14 +82,24 @@ function drawTileBase(ctx: Ctx, board: Board, fit: Fit, tile: Tile) {
   ctx.stroke();
 }
 
+/**
+ * A tile's art turns about the tile centre to face the current player, like the text. Turning
+ * about the centre keeps every icon the same distance from it, so the art stays clear of
+ * corners, edges and the token whichever way it faces.
+ */
 function drawTileIcons(ctx: Ctx, board: Board, fit: Fit, tile: Tile, view: View) {
   const s = fit.toScreen(board.layout.centers[tile.id]);
-  // Icons are placed in screen space so they stay upright whichever way the board is turned.
   const f = fit.scale / ICON_UNITS;
+  const a = (view.textAngle * Math.PI) / 180;
   ICON_SPOTS.forEach((spot, i) => {
-    const x = s.x + spot.x * fit.scale;
-    const y = s.y + spot.y * fit.scale;
-    drawTerrainIcon(ctx, tile.terrain, tile.id, i, x, y, f, view.animation.t, view.animation.level);
+    const turned = turnSpot(spot, view.textAngle);
+    const x = s.x + turned.x * fit.scale;
+    const y = s.y + turned.y * fit.scale;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(a);
+    drawTerrainIcon(ctx, tile.terrain, tile.id, i, 0, 0, f, view.animation.t, view.animation.level, x);
+    ctx.restore();
   });
 }
 
@@ -283,11 +293,12 @@ function drawBlocked(ctx: Ctx, board: Board, fit: Fit, tile: number) {
 }
 
 /** A hooded figure below the tile's token, so the number stays readable. */
-function drawThief(ctx: Ctx, board: Board, fit: Fit, thief: NonNullable<View['thief']>) {
+/** The thief stands below its tile's token as seen by the current player, turning with the text. */
+function drawThief(ctx: Ctx, board: Board, fit: Fit, thief: NonNullable<View['thief']>, angle: number) {
   const c = fit.toScreen(board.layout.centers[thief.tile]);
   const u = fit.scale * 1.4 * (1 + 0.12 * Math.sin(thief.pulse * Math.PI * 2));
-  const x = c.x;
-  const y = c.y + fit.scale * 0.58;
+  const x = 0;
+  const y = fit.scale * 0.58;
 
   if (thief.choosing) {
     ctx.save();
@@ -301,6 +312,8 @@ function drawThief(ctx: Ctx, board: Board, fit: Fit, thief: NonNullable<View['th
   }
 
   ctx.save();
+  ctx.translate(c.x, c.y);
+  ctx.rotate((angle * Math.PI) / 180);
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = u * 0.08;
   ctx.shadowOffsetY = u * 0.02;
@@ -368,7 +381,7 @@ export function drawLive(ctx: Ctx, board: Board, fit: Fit, width: number, height
   drawHighlight(ctx, board, fit, view);
   board.tiles.forEach((t) => drawToken(ctx, board, fit, t, view));
   view.highlight?.blocked.forEach((tile) => drawBlocked(ctx, board, fit, tile));
-  if (view.thief) drawThief(ctx, board, fit, view.thief);
+  if (view.thief) drawThief(ctx, board, fit, view.thief, view.textAngle);
   if (view.glow) drawGlow(ctx, width, height, view.glow);
 }
 
