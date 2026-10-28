@@ -1,20 +1,14 @@
 import type { Board, Harbor, Tile } from '../board/generate';
 import { RED_NUMBERS } from '../board/generate';
 import { corner, type Point } from '../board/layout';
+import type { AnimationLevel } from '../game/prefs';
+import { seatEdge } from '../game/players';
+import { drawTerrainIcon, ICON_SPOTS, ICON_UNITS } from './animate';
 import { COLORS, drawIcon, harborLabel, TERRAIN_COLORS } from './art';
 import { fitBoard, type Fit } from './fit';
-import { seatEdge } from '../game/players';
 
 type Ctx = CanvasRenderingContext2D;
 
-/** Icon spots relative to the tile centre, in hex units, kept clear of corners, edges and the token. */
-const ICON_SPOTS: Point[] = [
-  { x: -0.34, y: -0.5 },
-  { x: 0, y: -0.64 },
-  { x: 0.34, y: -0.5 },
-  { x: -0.42, y: 0.46 },
-  { x: 0.42, y: 0.46 },
-];
 const TOKEN_RADIUS = 0.3;
 const HARBOR_DISTANCE = 0.66;
 const HARBOR_RADIUS = 0.31;
@@ -66,7 +60,7 @@ function drawSea(ctx: Ctx, board: Board, fit: Fit) {
   });
 }
 
-function drawTile(ctx: Ctx, board: Board, fit: Fit, tile: Tile) {
+function drawTileBase(ctx: Ctx, board: Board, fit: Fit, tile: Tile) {
   const c = board.layout.centers[tile.id];
   const s = fit.toScreen(c);
   const [light, dark] = TERRAIN_COLORS[tile.terrain];
@@ -86,12 +80,17 @@ function drawTile(ctx: Ctx, board: Board, fit: Fit, tile: Tile) {
   ctx.lineWidth = Math.max(1, fit.scale * 0.025);
   ctx.strokeStyle = COLORS.tileEdge;
   ctx.stroke();
+}
 
+function drawTileIcons(ctx: Ctx, board: Board, fit: Fit, tile: Tile, view: View) {
+  const s = fit.toScreen(board.layout.centers[tile.id]);
   // Icons are placed in screen space so they stay upright whichever way the board is turned.
-  const iconScale = fit.scale / 125;
-  for (const spot of ICON_SPOTS) {
-    drawIcon(ctx, tile.terrain, s.x + spot.x * fit.scale, s.y + spot.y * fit.scale, iconScale);
-  }
+  const f = fit.scale / ICON_UNITS;
+  ICON_SPOTS.forEach((spot, i) => {
+    const x = s.x + spot.x * fit.scale;
+    const y = s.y + spot.y * fit.scale;
+    drawTerrainIcon(ctx, tile.terrain, tile.id, i, x, y, f, view.animation.t, view.animation.level);
+  });
 }
 
 function drawToken(ctx: Ctx, board: Board, fit: Fit, tile: Tile, view: View) {
@@ -210,12 +209,17 @@ function drawGlow(ctx: Ctx, width: number, height: number, glow: NonNullable<Vie
   ctx.restore();
 }
 
-function drawHarbor(ctx: Ctx, fit: Fit, harbor: Harbor, view: View) {
-  const { edge, kind } = harbor;
-  const at = fit.toScreen({
+function harborAt(fit: Fit, harbor: Harbor): Point {
+  const { edge } = harbor;
+  return fit.toScreen({
     x: edge.mid.x + edge.normal.x * HARBOR_DISTANCE,
     y: edge.mid.y + edge.normal.y * HARBOR_DISTANCE,
   });
+}
+
+function drawHarborBase(ctx: Ctx, fit: Fit, harbor: Harbor) {
+  const { edge, kind } = harbor;
+  const at = harborAt(fit, harbor);
   const r = HARBOR_RADIUS * fit.scale;
 
   // Two piers run from the edge's corners out to the harbor marker.
@@ -237,8 +241,13 @@ function drawHarbor(ctx: Ctx, fit: Fit, harbor: Harbor, view: View) {
   ctx.lineWidth = Math.max(1.5, r * 0.1);
   ctx.strokeStyle = COLORS.tokenEdge;
   ctx.stroke();
+}
 
-  // The label turns with the other text; the marker and piers stay put.
+/** The label turns with the other text; the marker and piers stay put. */
+function drawHarborLabel(ctx: Ctx, fit: Fit, harbor: Harbor, view: View) {
+  const { kind } = harbor;
+  const at = harborAt(fit, harbor);
+  const r = HARBOR_RADIUS * fit.scale;
   ctx.save();
   ctx.translate(at.x, at.y);
   ctx.rotate((view.textAngle * Math.PI) / 180);
@@ -326,21 +335,46 @@ export interface View {
   glow: { color: string; angle: number } | null;
   /** The on-screen thief; `pulse` runs 0 to 1 while players choose where to move it. */
   thief: { tile: number; choosing: boolean; pulse: number } | null;
+  /** Seconds on the animation clock, and how much the terrain art may move. */
+  animation: { t: number; level: AnimationLevel };
 }
 
-export const PLAIN_VIEW: View = { textAngle: 0, highlight: null, flashOn: false, glow: null, thief: null };
+export const PLAIN_VIEW: View = {
+  textAngle: 0,
+  highlight: null,
+  flashOn: false,
+  glow: null,
+  thief: null,
+  animation: { t: 0, level: 'off' },
+};
 
-/** Draws the full board to fill a canvas of the given CSS-pixel size. */
-export function drawBoard(ctx: Ctx, board: Board, width: number, height: number, view: View = PLAIN_VIEW): Fit {
+/**
+ * The parts of the board that never change during a game: background, sea, harbor markers
+ * and tile colors. Callers can draw this once into an offscreen canvas and reuse it.
+ */
+export function drawBase(ctx: Ctx, board: Board, width: number, height: number): Fit {
   const fit = fitBoard(board.layout, width, height);
   drawBackground(ctx, width, height);
   drawSea(ctx, board, fit);
-  board.harbors.forEach((h) => drawHarbor(ctx, fit, h, view));
-  board.tiles.forEach((t) => drawTile(ctx, board, fit, t));
+  board.harbors.forEach((h) => drawHarborBase(ctx, fit, h));
+  board.tiles.forEach((t) => drawTileBase(ctx, board, fit, t));
+  return fit;
+}
+
+/** Everything drawn on top of the base each frame: moving art, highlights, text, the thief and the glow. */
+export function drawLive(ctx: Ctx, board: Board, fit: Fit, width: number, height: number, view: View) {
+  board.tiles.forEach((t) => drawTileIcons(ctx, board, fit, t, view));
+  board.harbors.forEach((h) => drawHarborLabel(ctx, fit, h, view));
   drawHighlight(ctx, board, fit, view);
   board.tiles.forEach((t) => drawToken(ctx, board, fit, t, view));
   view.highlight?.blocked.forEach((tile) => drawBlocked(ctx, board, fit, tile));
   if (view.thief) drawThief(ctx, board, fit, view.thief);
   if (view.glow) drawGlow(ctx, width, height, view.glow);
+}
+
+/** Draws the full board to fill a canvas of the given CSS-pixel size. */
+export function drawBoard(ctx: Ctx, board: Board, width: number, height: number, view: View = PLAIN_VIEW): Fit {
+  const fit = drawBase(ctx, board, width, height);
+  drawLive(ctx, board, fit, width, height, view);
   return fit;
 }
