@@ -80,7 +80,7 @@ function isSavedBoard(b: unknown): b is SavedBoard {
   );
 }
 
-function isGameState(s: unknown): s is GameState {
+export function isGameState(s: unknown): s is GameState {
   if (typeof s !== 'object' || s === null) return false;
   const g = s as GameState;
   const players = Array.isArray(g.colors) ? g.colors.length : 0;

@@ -37,6 +37,18 @@ const MODE_INFO: Record<RandomMode, [string, string]> = {
   balancedPlus: ['Balanced+', 'Also no matching numbers side by side, and no more than two same-terrain tiles touching.'],
 };
 
+export type PlayMode = 'board' | 'phones';
+
+export interface SetupResult {
+  options: NewGameOptions;
+  play: PlayMode;
+}
+
+const PLAY_INFO: Record<PlayMode, [string, string]> = {
+  board: ['Board only', 'Play with your own pieces and cards. The board shows the map, dice and turns.'],
+  phones: ['Board + phones', 'Each player joins with a phone, which holds their cards. The app runs the game.'],
+};
+
 const ANIMATION_INFO: Record<AnimationLevel, [string, string]> = {
   full: ['Full', 'Sheep wander, wheat and trees sway, workers dig.'],
   calm: ['Calm', 'Gentle swaying only, at a lower frame rate.'],
@@ -46,13 +58,16 @@ const ANIMATION_INFO: Record<AnimationLevel, [string, string]> = {
 /**
  * The New game screen. Resolves with the chosen options, or null if cancelled.
  * `canCancel` is false on first launch, when there is no game to go back to.
+ * Board + phones needs the table server; `phones.available` is false anywhere else.
  * Animation is a device setting, not part of a game, so it applies as soon as it's tapped.
  */
 export function openSetup(
   defaults: SetupDefaults,
   canCancel: boolean,
   animation: { level: AnimationLevel; onChange: (level: AnimationLevel) => void },
-): Promise<NewGameOptions | null> {
+  phones: { available: boolean; play: PlayMode },
+): Promise<SetupResult | null> {
+  let play: PlayMode = phones.available ? phones.play : 'board';
   let animationLevel = animation.level;
   let colors = defaults.colors.slice();
   let size = defaults.size;
@@ -61,7 +76,7 @@ export function openSetup(
   let thiefStyle = defaults.thiefStyle;
   let firstSeat: number | 'random' = 'random';
 
-  return overlay<NewGameOptions | null>((done) => {
+  return overlay<SetupResult | null>((done) => {
     const dialog = el('div', { class: 'dialog setup', role: 'dialog', 'aria-label': 'New game' });
 
     const render = () => {
@@ -74,6 +89,7 @@ export function openSetup(
           el(
             'div',
             {},
+            section('Mode', playRow(), el('p', { class: 'hint' }, phones.available ? PLAY_INFO[play][1] : 'Board + phones needs the table server: run "npm run table" on this PC and open the address it shows.')),
             section('Players', playersRow()),
             section('Seats', seatsDiagram(), el('p', { class: 'hint' }, 'Seats go clockwise from the bottom edge. Tap a seat to change its color.')),
             section('First player', firstRow()),
@@ -93,13 +109,26 @@ export function openSetup(
 
     const start = () =>
       done({
-        colors,
-        firstSeat: firstSeat === 'random' ? randomSeat(colors.length, cryptoRng) : firstSeat,
-        size,
-        mode,
-        seed: randomSeed(),
-        thiefStyle,
+        options: {
+          colors,
+          firstSeat: firstSeat === 'random' ? randomSeat(colors.length, cryptoRng) : firstSeat,
+          size,
+          mode,
+          seed: randomSeed(),
+          thiefStyle,
+        },
+        play,
       });
+
+    const playRow = () =>
+      segmented(
+        (Object.keys(PLAY_INFO) as PlayMode[]).map((p) => ({
+          label: PLAY_INFO[p][0],
+          selected: p === play,
+          disabled: p === 'phones' && !phones.available,
+          onClick: () => ((play = p), render()),
+        })),
+      );
 
     const playersRow = () =>
       segmented(
@@ -208,6 +237,7 @@ interface Option {
   label: string;
   selected: boolean;
   color?: string;
+  disabled?: boolean;
   onClick: () => void;
 }
 
@@ -216,7 +246,7 @@ function segmented(options: Option[]) {
   for (const o of options) {
     const b = el(
       'button',
-      { type: 'button', class: `seg${o.selected ? ' selected' : ''}`, role: 'radio', 'aria-checked': o.selected ? 'true' : 'false' },
+      { type: 'button', class: `seg${o.selected ? ' selected' : ''}`, role: 'radio', 'aria-checked': o.selected ? 'true' : 'false', disabled: o.disabled },
       o.color ? el('span', { class: 'dot', style: `background:${o.color}` }) : null,
       o.label,
     );
