@@ -36,6 +36,10 @@ export const COLORS = {
   litGlow: 'rgba(255, 220, 90, 0.95)',
   tokenLit: '#fff6c8',
   tokenLitEdge: '#e0a800',
+  blocked: '#e0241a',
+  blockedFill: 'rgba(255, 245, 240, 0.82)',
+  thief: '#2b2d33',
+  thiefEdge: '#c9ccd6',
 };
 
 type Ctx = CanvasRenderingContext2D;

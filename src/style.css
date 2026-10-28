@@ -234,6 +234,20 @@ body {
 .banner.seven .banner-caption {
   color: var(--ink);
 }
+.banner.prompt {
+  border-color: var(--accent);
+}
+/* The banner lets taps through to the board, except on its own button. */
+.banner-action {
+  pointer-events: auto;
+  margin-top: 4px;
+}
+.banner-thief {
+  width: calc(var(--control-size) * 0.7);
+  height: calc(var(--control-size) * 0.7);
+  background: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='7' r='3.4' fill='%232b2d33' stroke='%23c9ccd6' stroke-width='1'/%3E%3Cpath d='M6 21c0-6.5 2.4-9.4 6-9.4s6 2.9 6 9.4z' fill='%232b2d33' stroke='%23c9ccd6' stroke-width='1'/%3E%3C/svg%3E");
+}
 .hidden {
   visibility: hidden;
 }

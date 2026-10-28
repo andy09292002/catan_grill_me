@@ -1,10 +1,22 @@
 import { restoreBoard, type Board, type RandomMode } from './board/generate';
 import { rollDice, THIEF_NUMBER } from './game/dice';
 import { PLAYER_HEX, PLAYER_NAMES, defaultColors, seatDirection } from './game/players';
-import { createGame, currentAngle, nextTurn, recordRoll, type GameState, type NewGameOptions, type Roll } from './game/state';
+import {
+  createGame,
+  currentAngle,
+  moveThief,
+  nextTurn,
+  production,
+  recordRoll,
+  type GameState,
+  type NewGameOptions,
+  type Roll,
+  type ThiefStyle,
+} from './game/state';
 import { loadGame, saveGame } from './game/storage';
 import { drawBoard } from './render/draw';
-import { showRollBanner, TUMBLE_MS } from './ui/banner';
+import { fitBoard, pickTile } from './render/fit';
+import { showBanner, TUMBLE_MS, type BannerHandle } from './ui/banner';
 import { confirmDialog } from './ui/confirm';
 import { openPad } from './ui/pad';
 import { FIRST_LAUNCH_DEFAULTS, openSetup } from './ui/setup';
@@ -16,6 +28,7 @@ registerSW({ immediate: true });
 const FLASH_MS = 3000;
 const FLASH_PERIOD_MS = 375;
 const TURN_MS = 500;
+const THIEF_PULSE_MS = 1200;
 
 const canvas = document.querySelector<HTMLCanvasElement>('#board')!;
 const ctx = canvas.getContext('2d')!;
@@ -34,6 +47,8 @@ let angleStart = -Infinity;
 let flashStart = -Infinity;
 let rolling = false;
 let frame = 0;
+/** Set while players choose where the on-screen thief goes; the board only takes taps then. */
+let choosingThief: BannerHandle | null = null;
 
 function setGame(next: GameState, opts: { resetAngle?: boolean } = {}) {
   const boardChanged = !game || game.board !== next.board;
@@ -76,12 +91,16 @@ function render(now: number) {
   const total = game.lastRoll?.total ?? null;
   drawBoard(ctx, board, width, height, {
     textAngle: angle,
-    lit: total === null || total === THIEF_NUMBER || rolling ? null : total,
+    highlight: total === null || total === THIEF_NUMBER || rolling ? null : production(game, total),
     flashOn: !flashing || Math.floor((now - flashStart) / FLASH_PERIOD_MS) % 2 === 0,
     glow: { color: PLAYER_HEX[game.colors[game.current]], angle },
+    thief:
+      game.thiefTile === null
+        ? null
+        : { tile: game.thiefTile, choosing: !!choosingThief, pulse: choosingThief ? (now % THIEF_PULSE_MS) / THIEF_PULSE_MS : 0 },
   });
 
-  if (t < 1 || flashing) requestRender();
+  if (t < 1 || flashing || choosingThief) requestRender();
 }
 
 function updateControls() {
@@ -93,6 +112,7 @@ function updateControls() {
   dot.style.background = PLAYER_HEX[color];
   document.querySelector('#next-turn')!.setAttribute('aria-label', `Next turn. Now playing: ${PLAYER_NAMES[color]}`);
   document.querySelector<HTMLElement>('#next-turn')!.style.setProperty('--player', PLAYER_HEX[color]);
+  document.querySelector<HTMLElement>('#move-thief')!.hidden = game.thiefStyle !== 'onscreen';
 
   // While the dice tumble, the corner still shows the previous roll so it doesn't give the result away.
   const skip = rolling ? 1 : 0;
@@ -111,17 +131,44 @@ function updateControls() {
   );
 }
 
-/** Banner position: from the screen centre towards the current player's side. */
-function bannerOffset(): { x: number; y: number } {
+/** Banner placement: from the screen centre towards the current player's side, turned to face them. */
+function bannerPlacement() {
   const d = seatDirection(angleTo);
   const reach = Math.min(window.innerWidth, window.innerHeight) * 0.24;
-  return { x: d.x * reach, y: d.y * reach };
+  return { offset: { x: d.x * reach, y: d.y * reach }, angle: angleTo };
+}
+
+/** Starts "move thief" mode: the banner stays up with Cancel until a tile is tapped. */
+function startChoosingThief(roll: Roll | null) {
+  stopChoosingThief();
+  choosingThief = showBanner(bannerPlacement(), roll, {
+    caption: 'Tap a tile to move the thief',
+    action: { label: 'Cancel', onClick: stopChoosingThief },
+  });
+  requestRender();
+}
+
+function stopChoosingThief() {
+  choosingThief?.close();
+  choosingThief = null;
+  requestRender();
+}
+
+function onBoardTap(e: PointerEvent) {
+  if (!game || !board || !choosingThief || rolling) return;
+  const fit = fitBoard(board.layout, window.innerWidth, window.innerHeight);
+  const tile = pickTile(board.layout, fit, { x: e.clientX, y: e.clientY });
+  if (tile === null || tile === game.thiefTile) return;
+  setGame(moveThief(game, tile));
+  stopChoosingThief();
 }
 
 function applyRoll(roll: Roll) {
   if (!game) return;
+  stopChoosingThief();
   setGame(recordRoll(game, roll));
-  showRollBanner(roll, bannerOffset(), angleTo);
+  if (roll.total === THIEF_NUMBER && game.thiefStyle === 'onscreen') startChoosingThief(roll);
+  else showBanner(bannerPlacement(), roll);
   if (roll.dice) {
     // Keep the result hidden on the board until the dice stop tumbling.
     rolling = true;
@@ -153,6 +200,7 @@ async function enterRoll() {
 
 function advanceTurn() {
   if (!game) return;
+  stopChoosingThief();
   angleFrom = angle;
   angleTo += 360 / game.colors.length;
   angleStart = performance.now();
@@ -161,7 +209,7 @@ function advanceTurn() {
 
 async function newGame(firstLaunch = false) {
   const defaults = game
-    ? { colors: game.colors, size: game.board.size, mode: game.board.mode }
+    ? { colors: game.colors, size: game.board.size, mode: game.board.mode, thiefStyle: game.thiefStyle }
     : FIRST_LAUNCH_DEFAULTS;
   const options = await openSetup(defaults, !firstLaunch);
   if (!options) return;
@@ -173,11 +221,12 @@ function startGame(options: NewGameOptions) {
   // A real game replaces any board opened from the URL, so drop the URL settings too.
   if (ephemeral) history.replaceState(null, '', location.pathname);
   ephemeral = false;
+  stopChoosingThief();
   game = null;
   setGame(createGame(options), { resetAngle: true });
 }
 
-/** ?size=30&mode=balancedPlus&seed=123&players=3 opens a fixed board without touching the saved game. */
+/** ?size=30&mode=balancedPlus&seed=123&players=3&thief=physical opens a fixed board without touching the saved game. */
 function gameFromUrl(): GameState | null {
   const params = new URLSearchParams(location.search);
   const seed = Number(params.get('seed'));
@@ -185,13 +234,15 @@ function gameFromUrl(): GameState | null {
   const players = Math.min(6, Math.max(2, Number(params.get('players')) || 4));
   const mode = (['random', 'balanced', 'balancedPlus'] as RandomMode[]).find((m) => m === params.get('mode')) ?? 'balanced';
   const size = params.get('size') === '30' ? 30 : 19;
-  return createGame({ colors: defaultColors(players), firstSeat: 0, size, mode, seed });
+  const thiefStyle: ThiefStyle = params.get('thief') === 'physical' ? 'physical' : 'onscreen';
+  return createGame({ colors: defaultColors(players), firstSeat: 0, size, mode, seed, thiefStyle });
 }
 
 document.querySelector('#roll')!.addEventListener('click', roll);
 document.querySelector('#pad-open')!.addEventListener('click', enterRoll);
 document.querySelector('#next-turn')!.addEventListener('click', advanceTurn);
 document.querySelector('#new-game')!.addEventListener('click', () => newGame());
+document.querySelector('#move-thief')!.addEventListener('click', () => (choosingThief ? stopChoosingThief() : startChoosingThief(null)));
 
 // Keyboard shortcuts for testing on a PC: R roll, N next turn.
 window.addEventListener('keydown', (e) => {
@@ -200,8 +251,21 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'n' || e.key === 'N') advanceTurn();
 });
 
-// The board ignores touch; only the corner controls respond.
+// The board ignores touch except while choosing where the on-screen thief goes.
 canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+canvas.addEventListener('pointerdown', onBoardTap);
+
+// Read-only view of the game for the screenshot script.
+declare global {
+  interface Window {
+    hexBoard?: { readonly game: GameState | null };
+  }
+}
+window.hexBoard = {
+  get game() {
+    return game;
+  },
+};
 window.addEventListener('resize', requestRender);
 
 const fromUrl = gameFromUrl();

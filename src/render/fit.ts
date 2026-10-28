@@ -11,6 +11,26 @@ export interface Fit {
   toScreen(p: Point): Point;
 }
 
+/**
+ * The tile under a screen point, or null over sea, harbors or between boards. A hex's inscribed
+ * circle (radius √3/2) covers all but its corners, and corners are where pieces sit, so they
+ * are deliberately left out rather than guessed.
+ */
+export function pickTile(layout: Layout, fit: Fit, p: Point): number | null {
+  const reach = (Math.sqrt(3) / 2) * fit.scale;
+  let best: number | null = null;
+  let bestDist = Infinity;
+  layout.centers.forEach((c, i) => {
+    const s = fit.toScreen(c);
+    const d = Math.hypot(s.x - p.x, s.y - p.y);
+    if (d < bestDist) {
+      best = i;
+      bestDist = d;
+    }
+  });
+  return bestDist <= reach ? best : null;
+}
+
 function rotate(p: Point, rotation: 0 | 90): Point {
   return rotation === 0 ? p : { x: -p.y, y: p.x };
 }
