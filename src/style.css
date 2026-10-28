@@ -1,10 +1,14 @@
 :root {
-  --control-size: clamp(56px, 8vmin, 104px);
+  --control-size: clamp(64px, 9vmin, 112px);
   --corner-gap: clamp(10px, 2vmin, 28px);
-  --panel: rgba(11, 26, 43, 0.82);
+  --panel: rgba(11, 26, 43, 0.86);
+  --panel-solid: #0f2236;
   --panel-edge: rgba(143, 176, 208, 0.35);
   --ink: #f4e7c5;
   --ink-muted: #8fb0d0;
+  --accent: #e0a800;
+  --red: #ff6b5e;
+  --text-angle: 0deg;
   color-scheme: dark;
 }
 
@@ -18,6 +22,7 @@ body {
   height: 100%;
   overflow: hidden;
   background: #0a1626;
+  color: var(--ink);
   font-family: system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
   /* The board is a play surface: no text selection, callouts, zoom or scroll on touch. */
   user-select: none;
@@ -34,6 +39,19 @@ body {
   height: 100dvh;
   display: block;
 }
+
+/* Anything marked .rot turns to face the current player. */
+.rot {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transform: rotate(var(--text-angle));
+  transition: transform 0.5s ease-in-out;
+}
+
+/* Corners */
 
 .corner {
   position: fixed;
@@ -56,45 +74,405 @@ body {
 .bottom-right {
   bottom: 0;
   right: 0;
-}
-
-.title {
-  color: var(--ink);
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  font-size: clamp(14px, 2vmin, 24px);
-  text-transform: uppercase;
-  opacity: 0.85;
+  align-items: flex-end;
 }
 
 .control {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  min-width: var(--control-size);
-  min-height: var(--control-size);
-  padding: 8px 12px;
-  border-radius: 18px;
-  border: 1.5px solid var(--panel-edge);
+  width: var(--control-size);
+  height: var(--control-size);
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--panel-edge);
   background: var(--panel);
   color: var(--ink);
   font: inherit;
-  font-size: clamp(11px, 1.5vmin, 16px);
+  font-size: clamp(11px, 1.4vmin, 15px);
   font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
   cursor: pointer;
   touch-action: manipulation;
 }
 .control:active {
-  transform: scale(0.96);
+  transform: scale(0.95);
 }
 .control svg {
-  width: calc(var(--control-size) * 0.4);
-  height: calc(var(--control-size) * 0.4);
+  width: calc(var(--control-size) * 0.34);
+  height: calc(var(--control-size) * 0.34);
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.control.roll {
+  width: calc(var(--control-size) * 1.35);
+  height: calc(var(--control-size) * 1.35);
+  background: var(--accent);
+  border-color: #ffd65a;
+  color: #1a1406;
+  font-size: clamp(13px, 1.8vmin, 20px);
+}
+.control.roll svg {
+  width: calc(var(--control-size) * 0.48);
+  height: calc(var(--control-size) * 0.48);
+}
+.control.roll svg circle {
+  fill: currentColor;
+}
+.control.small {
+  width: calc(var(--control-size) * 0.85);
+  height: calc(var(--control-size) * 0.85);
+}
+.control.next {
+  width: calc(var(--control-size) * 1.2);
+  height: calc(var(--control-size) * 1.2);
+  border: 4px solid var(--player, var(--panel-edge));
+}
+.turn-dot {
+  width: calc(var(--control-size) * 0.32);
+  height: calc(var(--control-size) * 0.32);
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.35);
+}
+
+.history {
+  width: calc(var(--control-size) * 1.9);
+  height: calc(var(--control-size) * 1.9);
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2px solid var(--panel-edge);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.history-inner {
+  gap: 2px;
+}
+.history-label {
+  font-size: clamp(10px, 1.2vmin, 13px);
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+.last-roll {
+  font-size: calc(var(--control-size) * 0.62);
+  font-weight: 900;
+  line-height: 1;
+}
+.last-roll.red,
+.chip.red {
+  color: var(--red);
+}
+.recent {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  max-width: calc(var(--control-size) * 1.3);
+  min-height: 1em;
+}
+.chip {
+  font-size: clamp(10px, 1.2vmin, 13px);
+  font-weight: 800;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(61, 110, 158, 0.45);
+}
+
+/* Roll banner */
+
+.banner {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(calc(-50% + var(--bx)), calc(-50% + var(--by))) rotate(var(--angle));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: calc(var(--control-size) * 0.2) calc(var(--control-size) * 0.4);
+  border-radius: 24px;
+  background: rgba(11, 26, 43, 0.9);
+  border: 2px solid var(--panel-edge);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  animation: banner-in 0.25s ease-out;
+  transition: opacity 0.4s;
+}
+.banner.leaving {
+  opacity: 0;
+}
+.banner.seven {
+  border-color: var(--red);
+}
+.banner-dice {
+  display: flex;
+  gap: 12px;
+}
+.banner-dice:empty {
+  display: none;
+}
+.banner-total {
+  font-size: calc(var(--control-size) * 1.1);
+  font-weight: 900;
+  line-height: 1;
+}
+.banner-total.red,
+.banner.seven .banner-total {
+  color: var(--red);
+}
+.banner-caption {
+  font-size: clamp(14px, 2vmin, 22px);
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+.banner.seven .banner-caption {
+  color: var(--ink);
+}
+.hidden {
+  visibility: hidden;
+}
+@keyframes banner-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.die {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: calc(var(--control-size) * 0.75);
+  height: calc(var(--control-size) * 0.75);
+  padding: 10%;
+  border-radius: 18%;
+  background: #fdfaf2;
+  box-shadow: inset 0 -4px 0 #d9cfb8;
+}
+.die span {
+  margin: 18%;
+  border-radius: 50%;
+}
+.die .pip {
+  background: #2a2a2a;
+}
+.die.tumbling {
+  animation: tumble 0.16s linear infinite;
+}
+@keyframes tumble {
+  50% {
+    transform: rotate(18deg) scale(0.92);
+  }
+}
+
+/* Overlays and dialogs */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(3, 9, 18, 0.72);
+  z-index: 10;
+}
+
+.dialog {
+  width: min(720px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  touch-action: pan-y;
+  padding: clamp(18px, 3vmin, 32px);
+  border-radius: 24px;
+  background: var(--panel-solid);
+  border: 1.5px solid var(--panel-edge);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.dialog.small {
+  width: min(460px, 100%);
+}
+.dialog h2 {
+  margin: 0 0 12px;
+  font-size: clamp(22px, 3vmin, 30px);
+}
+.dialog h3 {
+  margin: 18px 0 8px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+.dialog p {
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+.dialog .hint {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  min-width: 56px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1.5px solid var(--panel-edge);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.seg.selected {
+  background: var(--accent);
+  border-color: #ffd65a;
+  color: #1a1406;
+}
+.seg .dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.35);
+}
+
+.seat-table {
+  position: relative;
+  height: 170px;
+  margin: 4px 0;
+  border-radius: 16px;
+  background: #1b5f93;
+  border: 1.5px solid var(--panel-edge);
+}
+.seat {
+  position: absolute;
+  width: 52px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 3px solid rgba(0, 0, 0, 0.35);
+  font: inherit;
+  font-weight: 900;
+  font-size: 18px;
+  color: #1a1406;
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+.btn {
+  min-height: 52px;
+  padding: 0 24px;
+  border-radius: 14px;
+  border: 1.5px solid var(--panel-edge);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: #ffd65a;
+  color: #1a1406;
+}
+.btn.danger {
+  background: #c8392f;
+  border-color: #ff6b5e;
+  color: #fff;
+}
+
+/* Short screens (1366x768 and smaller): tighten the New game screen so Start game stays in view. */
+@media (max-height: 860px) {
+  .dialog {
+    padding: 16px 22px;
+  }
+  .dialog h2 {
+    margin-bottom: 4px;
+  }
+  .dialog h3 {
+    margin: 10px 0 6px;
+  }
+  .dialog .hint {
+    margin: 4px 0 0;
+    font-size: 13px;
+  }
+  .seat-table {
+    height: 112px;
+  }
+  .seat {
+    width: 44px;
+    height: 44px;
+  }
+  .seg,
+  .btn {
+    min-height: 44px;
+  }
+  .actions {
+    margin-top: 14px;
+  }
+}
+
+/* Number pad */
+
+.pad-overlay {
+  background: rgba(3, 9, 18, 0.55);
+}
+.pad {
+  padding: 20px;
+  border-radius: 28px;
+  background: var(--panel-solid);
+  border: 1.5px solid var(--panel-edge);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.pad p {
+  margin: 0 0 12px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+.pad-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.pad-key {
+  width: clamp(64px, 9vmin, 96px);
+  height: clamp(64px, 9vmin, 96px);
+  border-radius: 18px;
+  border: 1.5px solid var(--panel-edge);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font: inherit;
+  font-size: clamp(24px, 3.6vmin, 38px);
+  font-weight: 900;
+  cursor: pointer;
+}
+.pad-key.red {
+  color: var(--red);
+}
+.pad-key.seven {
+  border-color: var(--red);
+}
+.pad-key.close {
+  color: var(--ink-muted);
 }

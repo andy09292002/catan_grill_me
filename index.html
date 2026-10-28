@@ -12,28 +12,47 @@
   <body>
     <canvas id="board" aria-label="Game board"></canvas>
 
+    <!-- Corner contents turn towards the current player; the corners themselves stay put. -->
     <div class="corner top-left">
-      <span class="title">Hex Board</span>
+      <div id="history" class="history" aria-label="Rolls">
+        <div class="rot history-inner">
+          <div class="history-label">Last roll</div>
+          <div id="last-roll" class="last-roll">–</div>
+          <div id="recent" class="recent"></div>
+        </div>
+      </div>
     </div>
 
     <div class="corner top-right">
-      <button id="new-board" class="control" type="button" aria-label="New board">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" /></svg>
-        <span>New board</span>
+      <button id="new-game" class="control" type="button" aria-label="New game">
+        <span class="rot">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9zM12 9v6M9 12h6" /></svg>
+          <span>New game</span>
+        </span>
       </button>
     </div>
 
     <div class="corner bottom-left">
-      <button id="mode" class="control" type="button" aria-label="Random mode">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3a5 5 0 0 1 5 5 5 5 0 0 0 5 5h3M4 17h3a5 5 0 0 0 5-5 5 5 0 0 1 5-5h3M17 4l3 3-3 3M17 14l3 3-3 3" /></svg>
-        <span id="mode-label">Balanced</span>
+      <button id="next-turn" class="control next" type="button" aria-label="Next turn">
+        <span class="rot">
+          <span id="turn-dot" class="turn-dot"></span>
+          <span>Next turn</span>
+        </span>
       </button>
     </div>
 
     <div class="corner bottom-right">
-      <button id="size" class="control" type="button" aria-label="Board size">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z" /></svg>
-        <span id="size-label">19 hexes</span>
+      <button id="pad-open" class="control small" type="button" aria-label="Enter physical dice total">
+        <span class="rot">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h14M10 4L8 20M16 4l-2 16" /></svg>
+          <span>Enter</span>
+        </span>
+      </button>
+      <button id="roll" class="control roll" type="button" aria-label="Roll the dice">
+        <span class="rot">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="8.5" cy="8.5" r="1.2" /><circle cx="15.5" cy="15.5" r="1.2" /><circle cx="12" cy="12" r="1.2" /></svg>
+          <span>Roll</span>
+        </span>
       </button>
     </div>
 

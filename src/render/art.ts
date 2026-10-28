@@ -31,6 +31,11 @@ export const COLORS = {
   tokenText: '#2a2118',
   tokenRed: '#c8231b',
   pier: '#7a5530',
+  dim: 'rgba(5, 12, 22, 0.45)',
+  litRing: '#fff6b0',
+  litGlow: 'rgba(255, 220, 90, 0.95)',
+  tokenLit: '#fff6c8',
+  tokenLitEdge: '#e0a800',
 };
 
 type Ctx = CanvasRenderingContext2D;

@@ -3,6 +3,7 @@ import { RED_NUMBERS } from '../board/generate';
 import { corner, type Point } from '../board/layout';
 import { COLORS, drawIcon, harborLabel, TERRAIN_COLORS } from './art';
 import { fitBoard, type Fit } from './fit';
+import { seatEdge } from '../game/players';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -93,51 +94,123 @@ function drawTile(ctx: Ctx, board: Board, fit: Fit, tile: Tile) {
   }
 }
 
-function drawToken(ctx: Ctx, board: Board, fit: Fit, tile: Tile) {
+function drawToken(ctx: Ctx, board: Board, fit: Fit, tile: Tile, view: View) {
   if (tile.number === null) return;
   const s = fit.toScreen(board.layout.centers[tile.id]);
   const r = TOKEN_RADIUS * fit.scale;
   const red = RED_NUMBERS.includes(tile.number);
+  const lit = isLit(tile, view);
   const ink = red ? COLORS.tokenRed : COLORS.tokenText;
 
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.45)';
-  ctx.shadowBlur = r * 0.35;
-  ctx.shadowOffsetY = r * 0.1;
+  ctx.shadowColor = lit ? COLORS.litGlow : 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = lit ? r * 0.9 : r * 0.35;
+  ctx.shadowOffsetY = lit ? 0 : r * 0.1;
   ctx.beginPath();
   ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-  ctx.fillStyle = COLORS.token;
+  ctx.fillStyle = lit ? COLORS.tokenLit : COLORS.token;
   ctx.fill();
   ctx.restore();
-  ctx.lineWidth = Math.max(1, r * 0.07);
-  ctx.strokeStyle = COLORS.tokenEdge;
+  ctx.lineWidth = Math.max(1, r * (lit ? 0.12 : 0.07));
+  ctx.strokeStyle = lit ? COLORS.tokenLitEdge : COLORS.tokenEdge;
   ctx.stroke();
 
+  // Number and pips turn to face the current player; the token itself is round, so only its contents move.
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.rotate((view.textAngle * Math.PI) / 180);
   const label = String(tile.number);
   const size = r * 0.95;
   ctx.font = `800 ${size}px ${FONT}`;
   ctx.fillStyle = ink;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
-  const baseline = s.y + size * 0.3;
-  ctx.fillText(label, s.x, baseline);
+  const baseline = size * 0.3;
+  ctx.fillText(label, 0, baseline);
 
   // 6 and 9 read the same upside down, so they get an underline.
   if (tile.number === 6 || tile.number === 9) {
     const half = ctx.measureText(label).width / 2;
-    ctx.fillRect(s.x - half, baseline + size * 0.08, half * 2, Math.max(1, size * 0.08));
+    ctx.fillRect(-half, baseline + size * 0.08, half * 2, Math.max(1, size * 0.08));
   }
 
   const n = pips(tile.number);
   const gap = r * 0.2;
   for (let i = 0; i < n; i++) {
     ctx.beginPath();
-    ctx.arc(s.x + (i - (n - 1) / 2) * gap, s.y + r * 0.62, r * 0.07, 0, Math.PI * 2);
+    ctx.arc((i - (n - 1) / 2) * gap, r * 0.62, r * 0.07, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
 }
 
-function drawHarbor(ctx: Ctx, fit: Fit, harbor: Harbor) {
+function isLit(tile: Tile, view: View): boolean {
+  return view.lit !== null && tile.number === view.lit;
+}
+
+/** Darkens tiles that didn't produce and rings the ones that did. */
+function drawHighlight(ctx: Ctx, board: Board, fit: Fit, view: View) {
+  if (view.lit === null) return;
+  const { centers } = board.layout;
+  ctx.fillStyle = COLORS.dim;
+  board.tiles.forEach((t) => {
+    if (isLit(t, view)) return;
+    hexPath(ctx, fit, centers[t.id], 0.975);
+    ctx.fill();
+  });
+  if (!view.flashOn) return;
+  board.tiles.forEach((t) => {
+    if (!isLit(t, view)) return;
+    ctx.save();
+    ctx.shadowColor = COLORS.litGlow;
+    ctx.shadowBlur = fit.scale * 0.35;
+    ctx.strokeStyle = COLORS.litRing;
+    ctx.lineWidth = fit.scale * 0.08;
+    ctx.lineJoin = 'round';
+    hexPath(ctx, fit, centers[t.id], 0.93);
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+/** A soft band of the current player's color along their side of the screen. */
+function drawGlow(ctx: Ctx, width: number, height: number, glow: NonNullable<View['glow']>) {
+  const { point, side } = seatEdge(glow.angle, width, height);
+  const horizontal = side === 'top' || side === 'bottom';
+  const edgeLength = horizontal ? width : height;
+  const length = edgeLength * 0.5;
+  const thick = Math.min(width, height) * 0.05;
+  const along = horizontal ? point.x : point.y;
+  const start = Math.max(0, Math.min(edgeLength - length, along - length / 2));
+
+  let x = 0;
+  let y = 0;
+  let w = thick;
+  let h = thick;
+  let g: CanvasGradient;
+  if (horizontal) {
+    x = start;
+    w = length;
+    y = side === 'top' ? 0 : height - thick;
+    g = side === 'top' ? ctx.createLinearGradient(0, 0, 0, thick) : ctx.createLinearGradient(0, height, 0, height - thick);
+  } else {
+    y = start;
+    h = length;
+    x = side === 'left' ? 0 : width - thick;
+    g = side === 'left' ? ctx.createLinearGradient(0, 0, thick, 0) : ctx.createLinearGradient(width, 0, width - thick, 0);
+  }
+  g.addColorStop(0, glow.color);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.save();
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, thick / 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHarbor(ctx: Ctx, fit: Fit, harbor: Harbor, view: View) {
   const { edge, kind } = harbor;
   const at = fit.toScreen({
     x: edge.mid.x + edge.normal.x * HARBOR_DISTANCE,
@@ -165,22 +238,42 @@ function drawHarbor(ctx: Ctx, fit: Fit, harbor: Harbor) {
   ctx.strokeStyle = COLORS.tokenEdge;
   ctx.stroke();
 
-  if (kind !== 'generic') drawIcon(ctx, kind, at.x, at.y - r * 0.32, r / 50);
+  // The label turns with the other text; the marker and piers stay put.
+  ctx.save();
+  ctx.translate(at.x, at.y);
+  ctx.rotate((view.textAngle * Math.PI) / 180);
+  if (kind !== 'generic') drawIcon(ctx, kind, 0, -r * 0.32, r / 50);
   const size = r * (kind === 'generic' ? 0.66 : 0.56);
   ctx.font = `800 ${size}px ${FONT}`;
   ctx.fillStyle = COLORS.tokenText;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(harborLabel(kind), at.x, kind === 'generic' ? at.y : at.y + r * 0.45);
+  ctx.fillText(harborLabel(kind), 0, kind === 'generic' ? 0 : r * 0.45);
+  ctx.restore();
 }
 
+export interface View {
+  /** Degrees the board's text is turned, towards the current player. */
+  textAngle: number;
+  /** The rolled number to highlight, or null for none (including after a 7). */
+  lit: number | null;
+  /** Whether the highlight ring shows; it blinks for a few seconds after a roll, then stays on. */
+  flashOn: boolean;
+  /** The current player's edge glow. */
+  glow: { color: string; angle: number } | null;
+}
+
+export const PLAIN_VIEW: View = { textAngle: 0, lit: null, flashOn: false, glow: null };
+
 /** Draws the full board to fill a canvas of the given CSS-pixel size. */
-export function drawBoard(ctx: Ctx, board: Board, width: number, height: number): Fit {
+export function drawBoard(ctx: Ctx, board: Board, width: number, height: number, view: View = PLAIN_VIEW): Fit {
   const fit = fitBoard(board.layout, width, height);
   drawBackground(ctx, width, height);
   drawSea(ctx, board, fit);
-  board.harbors.forEach((h) => drawHarbor(ctx, fit, h));
+  board.harbors.forEach((h) => drawHarbor(ctx, fit, h, view));
   board.tiles.forEach((t) => drawTile(ctx, board, fit, t));
-  board.tiles.forEach((t) => drawToken(ctx, board, fit, t));
+  drawHighlight(ctx, board, fit, view);
+  board.tiles.forEach((t) => drawToken(ctx, board, fit, t, view));
+  if (view.glow) drawGlow(ctx, width, height, view.glow);
   return fit;
 }
