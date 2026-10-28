@@ -371,7 +371,7 @@ A touch-screen board companion for the physical game the players own. The board 
 4. Thief
 5. Animation
 
-## Assumptions awaiting confirmation
+## Assumptions (confirmed 2026-10-27)
 
 - App title "Hex Board", without the official game's name or logo. The repo name can stay as it is.
 - Harbor labels are an icon plus the trade ratio (3:1 or 2:1). The labels rotate with the other text; the harbors themselves stay put.

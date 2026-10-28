@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#0a1626" />
+    <title>Hex Board</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <canvas id="board" aria-label="Game board"></canvas>
+
+    <div class="corner top-left">
+      <span class="title">Hex Board</span>
+    </div>
+
+    <div class="corner top-right">
+      <button id="new-board" class="control" type="button" aria-label="New board">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" /></svg>
+        <span>New board</span>
+      </button>
+    </div>
+
+    <div class="corner bottom-left">
+      <button id="mode" class="control" type="button" aria-label="Random mode">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3a5 5 0 0 1 5 5 5 5 0 0 0 5 5h3M4 17h3a5 5 0 0 0 5-5 5 5 0 0 1 5-5h3M17 4l3 3-3 3M17 14l3 3-3 3" /></svg>
+        <span id="mode-label">Balanced</span>
+      </button>
+    </div>
+
+    <div class="corner bottom-right">
+      <button id="size" class="control" type="button" aria-label="Board size">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z" /></svg>
+        <span id="size-label">19 hexes</span>
+      </button>
+    </div>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
