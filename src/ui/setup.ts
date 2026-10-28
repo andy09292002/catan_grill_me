@@ -2,6 +2,7 @@ import { boardSizeForPlayers, type RandomMode } from '../board/generate';
 import type { BoardSize } from '../board/layout';
 import { randomSeed } from '../board/rng';
 import { cryptoRng } from '../game/dice';
+import type { AnimationLevel } from '../game/prefs';
 import {
   defaultColors,
   MAX_PLAYERS,
@@ -36,11 +37,23 @@ const MODE_INFO: Record<RandomMode, [string, string]> = {
   balancedPlus: ['Balanced+', 'Also no matching numbers side by side, and no more than two same-terrain tiles touching.'],
 };
 
+const ANIMATION_INFO: Record<AnimationLevel, [string, string]> = {
+  full: ['Full', 'Sheep wander, wheat and trees sway, workers dig.'],
+  calm: ['Calm', 'Gentle swaying only, at a lower frame rate.'],
+  off: ['Off', 'A still board. Saves battery.'],
+};
+
 /**
  * The New game screen. Resolves with the chosen options, or null if cancelled.
  * `canCancel` is false on first launch, when there is no game to go back to.
+ * Animation is a device setting, not part of a game, so it applies as soon as it's tapped.
  */
-export function openSetup(defaults: SetupDefaults, canCancel: boolean): Promise<NewGameOptions | null> {
+export function openSetup(
+  defaults: SetupDefaults,
+  canCancel: boolean,
+  animation: { level: AnimationLevel; onChange: (level: AnimationLevel) => void },
+): Promise<NewGameOptions | null> {
+  let animationLevel = animation.level;
   let colors = defaults.colors.slice();
   let size = defaults.size;
   let sizeOverridden = size !== boardSizeForPlayers(colors.length);
@@ -54,12 +67,26 @@ export function openSetup(defaults: SetupDefaults, canCancel: boolean): Promise<
     const render = () => {
       dialog.replaceChildren(
         el('h2', {}, 'New game'),
-        section('Players', playersRow()),
-        section('Seats', seatsDiagram(), el('p', { class: 'hint' }, 'Seats go clockwise from the bottom edge. Tap a seat to change its color.')),
-        section('First player', firstRow()),
-        section('Board', sizeRow()),
-        section('Random mode', modeRow(), el('p', { class: 'hint' }, MODE_INFO[mode][1])),
-        section('Thief', thiefRow(), el('p', { class: 'hint' }, THIEF_INFO[thiefStyle][1])),
+        // Two columns on wide, short screens (see style.css); one column otherwise.
+        el(
+          'div',
+          { class: 'setup-grid' },
+          el(
+            'div',
+            {},
+            section('Players', playersRow()),
+            section('Seats', seatsDiagram(), el('p', { class: 'hint' }, 'Seats go clockwise from the bottom edge. Tap a seat to change its color.')),
+            section('First player', firstRow()),
+          ),
+          el(
+            'div',
+            {},
+            section('Board', sizeRow()),
+            section('Random mode', modeRow(), el('p', { class: 'hint' }, MODE_INFO[mode][1])),
+            section('Thief', thiefRow(), el('p', { class: 'hint' }, THIEF_INFO[thiefStyle][1])),
+            section('Animation', animationRow(), el('p', { class: 'hint' }, `${ANIMATION_INFO[animationLevel][1]} Applies right away.`)),
+          ),
+        ),
         el('div', { class: 'actions' }, canCancel && action('Cancel', 'secondary', () => done(null)), action('Start game', 'primary', start)),
       );
     };
@@ -152,6 +179,19 @@ export function openSetup(defaults: SetupDefaults, canCancel: boolean): Promise<
           label: THIEF_INFO[t][0],
           selected: t === thiefStyle,
           onClick: () => ((thiefStyle = t), render()),
+        })),
+      );
+
+    const animationRow = () =>
+      segmented(
+        (Object.keys(ANIMATION_INFO) as AnimationLevel[]).map((a) => ({
+          label: ANIMATION_INFO[a][0],
+          selected: a === animationLevel,
+          onClick: () => {
+            animationLevel = a;
+            animation.onChange(a);
+            render();
+          },
         })),
       );
 

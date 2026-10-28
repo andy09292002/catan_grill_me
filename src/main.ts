@@ -13,9 +13,11 @@ import {
   type Roll,
   type ThiefStyle,
 } from './game/state';
+import { loadPrefs, savePrefs, type AnimationLevel } from './game/prefs';
 import { loadGame, saveGame } from './game/storage';
-import { drawBoard } from './render/draw';
-import { fitBoard, pickTile } from './render/fit';
+import { drawBase, drawLive } from './render/draw';
+import { fitBoard, pickTile, type Fit } from './render/fit';
+import { FrameBudget } from './render/perf';
 import { showBanner, TUMBLE_MS, type BannerHandle } from './ui/banner';
 import { confirmDialog } from './ui/confirm';
 import { openPad } from './ui/pad';
@@ -29,6 +31,10 @@ const FLASH_MS = 3000;
 const FLASH_PERIOD_MS = 375;
 const TURN_MS = 500;
 const THIEF_PULSE_MS = 1200;
+/** Calm only sways slowly, so it redraws at about 30 fps to save power. */
+const CALM_FRAME_MS = 33;
+/** Full animation drops to Calm if frames average longer than this to draw. */
+const FRAME_BUDGET_MS = 14;
 
 const canvas = document.querySelector<HTMLCanvasElement>('#board')!;
 const ctx = canvas.getContext('2d')!;
@@ -49,6 +55,33 @@ let rolling = false;
 let frame = 0;
 /** Set while players choose where the on-screen thief goes; the board only takes taps then. */
 let choosingThief: BannerHandle | null = null;
+
+let prefs = loadPrefs();
+/** Lowered for this session if the device can't keep up with Full; the saved preference stays. */
+let slowDevice = false;
+const frameBudget = new FrameBudget(FRAME_BUDGET_MS, 90);
+let lastDraw = -Infinity;
+/** Recent draw times, for the screenshot script and for checking speed on a real device. */
+const drawTimes: number[] = [];
+
+// The parts of the board that don't move are drawn once into an offscreen canvas.
+const baseCanvas = document.createElement('canvas');
+const baseCtx = baseCanvas.getContext('2d')!;
+let baseKey = '';
+let baseBoard: Board | null = null;
+let baseFit: Fit | null = null;
+
+function animationLevel(): AnimationLevel {
+  return slowDevice && prefs.animation === 'full' ? 'calm' : prefs.animation;
+}
+
+function setAnimation(level: AnimationLevel) {
+  prefs = { ...prefs, animation: level };
+  savePrefs(prefs);
+  slowDevice = false;
+  frameBudget.reset();
+  requestRender();
+}
 
 function setGame(next: GameState, opts: { resetAngle?: boolean } = {}) {
   const boardChanged = !game || game.board !== next.board;
@@ -79,17 +112,41 @@ function render(now: number) {
   angle = angleFrom + (angleTo - angleFrom) * easeInOut(t);
   const flashing = now - flashStart < FLASH_MS;
 
+  const level = animationLevel();
+  const busy = t < 1 || flashing || !!choosingThief;
+  // Calm skips frames unless something else on the board is moving.
+  if (level === 'calm' && !busy && now - lastDraw < CALM_FRAME_MS) {
+    requestRender();
+    return;
+  }
+  lastDraw = now;
+  const started = performance.now();
+
   const dpr = window.devicePixelRatio || 1;
   const width = window.innerWidth;
   const height = window.innerHeight;
-  if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
+  const pw = Math.round(width * dpr);
+  const ph = Math.round(height * dpr);
+  if (canvas.width !== pw || canvas.height !== ph) {
+    canvas.width = pw;
+    canvas.height = ph;
   }
+
+  const key = `${pw}x${ph}@${dpr}`;
+  if (key !== baseKey || baseBoard !== board || !baseFit) {
+    baseCanvas.width = pw;
+    baseCanvas.height = ph;
+    baseCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    baseFit = drawBase(baseCtx, board, width, height);
+    baseKey = key;
+    baseBoard = board;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(baseCanvas, 0, 0);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const total = game.lastRoll?.total ?? null;
-  drawBoard(ctx, board, width, height, {
+  drawLive(ctx, board, baseFit, width, height, {
     textAngle: angle,
     highlight: total === null || total === THIEF_NUMBER || rolling ? null : production(game, total),
     flashOn: !flashing || Math.floor((now - flashStart) / FLASH_PERIOD_MS) % 2 === 0,
@@ -98,9 +155,27 @@ function render(now: number) {
       game.thiefTile === null
         ? null
         : { tile: game.thiefTile, choosing: !!choosingThief, pulse: choosingThief ? (now % THIEF_PULSE_MS) / THIEF_PULSE_MS : 0 },
+    animation: { t: now / 1000, level },
   });
 
-  if (t < 1 || flashing || choosingThief) requestRender();
+  const drawMs = performance.now() - started;
+  drawTimes.push(drawMs);
+  if (drawTimes.length > 120) drawTimes.shift();
+  if (level === 'full' && frameBudget.record(drawMs)) {
+    slowDevice = true;
+    showToast('Animation eased to Calm to keep the board smooth');
+  }
+  if (busy || level !== 'off') requestRender();
+}
+
+function showToast(message: string) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.setAttribute('role', 'status');
+  toast.textContent = message;
+  document.body.append(toast);
+  window.setTimeout(() => toast.classList.add('leaving'), 3500);
+  window.setTimeout(() => toast.remove(), 4000);
 }
 
 function updateControls() {
@@ -211,7 +286,7 @@ async function newGame(firstLaunch = false) {
   const defaults = game
     ? { colors: game.colors, size: game.board.size, mode: game.board.mode, thiefStyle: game.thiefStyle }
     : FIRST_LAUNCH_DEFAULTS;
-  const options = await openSetup(defaults, !firstLaunch);
+  const options = await openSetup(defaults, !firstLaunch, { level: prefs.animation, onChange: setAnimation });
   if (!options) return;
   if (game && !(await confirmDialog('Replace the current board?', 'The board, turn and roll history of the game in progress will be lost.', 'Replace', 'Keep current board'))) return;
   startGame(options);
@@ -258,12 +333,19 @@ canvas.addEventListener('pointerdown', onBoardTap);
 // Read-only view of the game for the screenshot script.
 declare global {
   interface Window {
-    hexBoard?: { readonly game: GameState | null };
+    hexBoard?: {
+      readonly game: GameState | null;
+      readonly stats: { level: AnimationLevel; slowDevice: boolean; averageDrawMs: number };
+    };
   }
 }
 window.hexBoard = {
   get game() {
     return game;
+  },
+  get stats() {
+    const averageDrawMs = drawTimes.length ? drawTimes.reduce((a, b) => a + b, 0) / drawTimes.length : 0;
+    return { level: animationLevel(), slowDevice, averageDrawMs };
   },
 };
 window.addEventListener('resize', requestRender);

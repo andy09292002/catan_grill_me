@@ -446,6 +446,18 @@ body {
   }
 }
 
+/* Wide but short screens (landscape monitors and tablets): the New game screen goes two columns. */
+@media (min-width: 1000px) and (max-height: 1000px) {
+  .dialog.setup {
+    width: min(1120px, 100%);
+  }
+  .setup-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 36px;
+  }
+}
+
 /* Number pad */
 
 .pad-overlay {
@@ -489,4 +501,26 @@ body {
 }
 .pad-key.close {
   color: var(--ink-muted);
+}
+
+/* Toast */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--corner-gap) + var(--control-size) * 0.4);
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100vw - 2 * var(--control-size) - 4 * var(--corner-gap)));
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: var(--panel-solid);
+  border: 1.5px solid var(--panel-edge);
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+  animation: banner-in 0.25s ease-out;
+  transition: opacity 0.4s;
+}
+.toast.leaving {
+  opacity: 0;
 }
