@@ -171,6 +171,37 @@ export function generateBoard({ size, mode, seed }: GenerateOptions): Board {
   return { size, mode, seed, layout, tiles, harbors: placeHarbors(layout, expand(contents.harbors), rng) };
 }
 
+/** The parts of a board that must be saved to redraw it exactly, even if the generator changes later. */
+export interface SavedBoard {
+  size: BoardSize;
+  mode: RandomMode;
+  seed: number;
+  tiles: { terrain: Terrain; number: number | null }[];
+  harbors: { kind: HarborKind; coast: number }[];
+}
+
+export function saveBoard(board: Board): SavedBoard {
+  return {
+    size: board.size,
+    mode: board.mode,
+    seed: board.seed,
+    tiles: board.tiles.map(({ terrain, number }) => ({ terrain, number })),
+    harbors: board.harbors.map((h) => ({ kind: h.kind, coast: board.layout.coast.indexOf(h.edge) })),
+  };
+}
+
+export function restoreBoard(saved: SavedBoard): Board {
+  const layout = buildLayout(saved.size);
+  return {
+    size: saved.size,
+    mode: saved.mode,
+    seed: saved.seed,
+    layout,
+    tiles: saved.tiles.map((t, id) => ({ id, ...t })),
+    harbors: saved.harbors.map((h) => ({ kind: h.kind, edge: layout.coast[h.coast] })),
+  };
+}
+
 export function boardSizeForPlayers(players: number): BoardSize {
   return players >= 5 ? 30 : 19;
 }
