@@ -378,3 +378,266 @@ A touch-screen board companion for the physical game the players own. The board 
 - The repo is public, which GitHub Pages on a free account requires.
 - Corner layout: Roll and the number pad in one corner, Next turn in another, New game and settings in a third, last roll and roll history in the fourth.
 - A 7 entered on the number pad triggers the same thief flow as a 7 from the Roll button.
+
+---
+
+# Session 2: Board + phones mode
+
+A second `/grill-me` session, held on 2026-10-28.
+
+## Starting idea
+
+> Can I use mobile phones to interact with the board, so everyone gets a phone to hide their cards and make decisions on the phone?
+
+This reopens two decisions from session 1: Q1 (no rules engine) and Q2 (the app doesn't know where pieces are). They still hold for Board only mode. The new mode below is where they change.
+
+## Questions and answers
+
+### P1. How much does the app know about the game?
+
+- (a) Phone as a private card wallet: players tap +/− on their own cards, and the board still knows nothing.
+- (b) The app knows where the pieces are, deals cards and runs the rules.
+- (c) In between: automatic dealing, with manual building and trading.
+
+**Recommended:** (a).
+
+**Answer:** Two modes: one is the board monitor only, played physically, where the system doesn't know the situation. The other is the board monitor plus phones, running the game fully digitally.
+
+**Decision:** Two modes, chosen per game. **Board only** is today's app, unchanged. **Board + phones** runs the full rules (option b).
+
+### P2. In Board + phones mode, are the pieces physical or drawn?
+
+- (a) Drawn by the app.
+- (b) Physical pieces, also entered into the app.
+- (c) Both.
+
+**Recommended:** (a).
+
+**Answer:** Drawn on screen.
+
+**Decision:** The app draws every road, settlement and city in the seat color. No physical pieces go on the monitor in this mode.
+
+### P3. How do phones talk to the board?
+
+- (a) A direct WebRTC link, set up through a free public service. Keeps GitHub Pages.
+- (b) A small server on the PC, over home Wi-Fi.
+- (c) A hosted online database.
+
+**Recommended:** (a).
+
+**Answer:** Try (a), if it doesn't require internet.
+
+Follow-up: (a) needs the internet to load the phone page and for the handshake. The board has no camera, so a two-way QR handshake can't replace it. Only (b) works without internet.
+
+**Answer:** Local server only is OK.
+
+**Decision:** Board + phones runs from a small server on the PC (`npm run table`). Phones join over the same Wi-Fi by QR code, with no internet. Board only mode stays on GitHub Pages.
+
+### P4. Which rules?
+
+- (a) Base game for 3–4 players.
+- (b) (a) plus the 5–6 player extension.
+- (c) (b) plus expansions.
+
+**Recommended:** (b).
+
+**Answer:** (b), 2–6 players, base game only.
+
+**Decision:** Base game only, no expansions, for 2–6 players. 5–6 players use the 30-hex board and the special build phase.
+
+### P5. Two players
+
+- (a) The same rules with 2 seats on the 19-hex board.
+- (b) A 2-player variant with neutral pieces.
+
+**Recommended:** (a). **Answer:** (a).
+
+**Decision:** No special 2-player rules.
+
+### P6. Where are build spots picked?
+
+- (a) On the phone's map.
+- (b) On the board monitor.
+- (c) Either, confirmed on the phone.
+
+**Recommended:** (c).
+
+**Answer:** On the board only.
+
+**Decision:** The phone starts the action, the legal spots light up on the board in the player's color, and the player taps one on the board.
+
+### P7. How is a build confirmed?
+
+- (a) Tap on the board, confirm on the phone.
+- (b) Tap on the board, confirm with ✓ / ✗ on the board.
+- (c) No confirm, but undo.
+
+**Recommended:** (a). **Answer:** (b).
+
+**Decision:** Tapping a spot shows a preview piece, and a ✓ / ✗ next to it places or cancels the build. The board takes those taps only while a build is waiting.
+
+### P8. Player trades
+
+- (a) Talk it out, then the current player sends the deal to one player, who accepts or declines.
+- (b) An open offer to everyone.
+- (c) Both.
+
+**Recommended:** (a). **Answer:** (a).
+
+**Decision:** Direct offers to one player. Bank and harbor trades happen on your own phone at your best rate.
+
+### P9. What the board shows about each player
+
+- (a) A panel at each player's edge, facing them.
+- (b) Points only.
+- (c) Nothing.
+
+**Recommended:** (a). **Answer:** (a).
+
+**Decision:** Each panel shows public points (without hidden victory-point cards), the number of resource cards, the number of development cards, knights played, and the Largest Army and Longest Road badges. It glows when the player holds more than 7 cards.
+
+### P10. Joining and dropped phones
+
+- (a) A seat key on each phone, plus a rejoin QR code on the board.
+- (b) The same, plus a PIN.
+
+**Recommended:** (a). **Answer:** (a).
+
+**Decision:** Reopening the page puts a player back in their seat. Tapping a seat's panel on the board shows a rejoin QR code that moves the seat to another phone, and the old key stops working. The game waits only when it needs the missing player. The server saves the game to a file after every action and resumes after a restart.
+
+### P11. Dice
+
+- (a) Roll on the phone.
+- (b) Roll on the phone, or roll physical dice and key them in on the phone.
+- (c) Roll on the board.
+
+**Recommended:** (b).
+
+**Answer:** Roll on the phone, or on the board, or roll physical dice and key them in.
+
+**Decision:** All three ways, and every way rolls for the current player: the phone's Roll button, the board's Roll button, or physical dice keyed into the phone's or the board's number pad.
+
+### P12. The thief and stealing
+
+- (a) Move the thief on the board, choose the victim on the phone, take a random card.
+- (b) Everything on the board.
+
+**Recommended:** (a).
+
+**Answer:** (a), but not a random card. The thief sees the victim's cards face down (5 cards means 5 backs) and picks one. The card at that position is taken from the victim.
+
+**Decision:** The thief moves on the board with ✓ / ✗. The victim is chosen on the phone, then the victim's cards appear face down and the thief picks one. On a 7, discards happen on every phone at the same time.
+
+### P13. Order of the face-down cards
+
+- (a) Shuffled fresh for each steal.
+- (b) The victim arranges their own hand.
+
+**Recommended:** (a). **Answer:** (a), shuffled every time.
+
+**Decision:** A fresh shuffle for every steal. The victim's phone shows the same shuffled order, so the card at the picked position is the one that leaves.
+
+### P14. Mistakes
+
+- (a) No undo.
+- (b) Undo your own last action until anyone else learns something.
+- (c) A table-wide rewind.
+
+**Recommended:** (b).
+
+**Answer:** No undo for buying or trading.
+
+**Decision:** Players can undo their own last road, settlement or city until anything else happens. Buying a development card and all trades are final.
+
+### P15. Starting a digital game
+
+- (a) Set up on the board's New game screen, then the phones claim seats.
+- (b) The first phone hosts.
+
+**Recommended:** (a). **Answer:** (a).
+
+**Decision:** The New game screen gains **Mode: Board only / Board + phones**. The board shows a QR code, each phone claims a free color, and Start appears once every seat has a phone. Setup placement follows the snake order.
+
+### P16. Ending the game
+
+- (a) An automatic win at 10 points.
+- (b) The player claims the win.
+
+**Recommended:** (a). **Answer:** Automatic.
+
+**Decision:** The game ends as soon as the current player reaches 10 points, counting hidden victory-point cards. The board reveals those cards and shows the winner and final scores, each phone shows a summary, and Rematch keeps the same phones and seats.
+
+### P17. Phone layout
+
+- (a) Portrait, with the hand at the bottom.
+- (b) Landscape.
+
+**Recommended:** (a).
+
+**Answer:** Landscape, like holding cards fanned in one hand.
+
+**Decision:** Landscape, with the cards fanned in an arc and the action buttons alongside. A phone held upright asks to be turned sideways.
+
+### P18. Where the rules run
+
+- (a) The PC server is the only judge, and each device receives only what it may see.
+- (b) Every device runs the rules.
+
+**Recommended:** (a). **Answer:** (a), a single judge on the PC.
+
+**Decision:** Node and WebSockets in the same repo. The rules engine is plain TypeScript with no screen code. Phones never receive other players' hidden cards. A double-click exe comes later.
+
+### P19. Testing
+
+- (a) Rules unit tests, simulated bot games and screen tests.
+- (b) Rules unit tests and screen tests.
+
+**Recommended:** (a).
+
+**Answer:** (a), with a unit test for each rule.
+
+**Decision:** Vitest unit tests for each rule. Thousands of simulated bot games through the real server, checking that cards are never created or lost, nothing illegal is accepted and every game ends. Playwright screen tests of the board with 2–6 phones. A checklist for real phones and the touch monitor.
+
+### P20. Build order
+
+- (a) Five milestones.
+- (b) Fewer, bigger milestones.
+
+**Recommended:** (a). **Answer:** (a).
+
+**Decision:** M6 to M10, listed in the summary below.
+
+## Summary (session 2)
+
+**Modes:** Board only (unchanged, GitHub Pages) and Board + phones (full base-game rules, pieces drawn by the app).
+
+**Rules:** base game for 2–6 players. 5–6 players use the 30-hex board and the special build phase.
+
+**Connection:** a local Node server on the PC with WebSockets and no internet. The server is the only judge, and each phone receives only its own hidden information.
+
+**At the table**
+- Set up on the board, and phones claim seats by QR code.
+- Seat keys handle reconnecting, and a rejoin QR code moves a seat to another phone.
+- The game is saved to a file after every action.
+- Builds start on the phone, are picked on the board and are confirmed with ✓ / ✗ on the board. Only builds can be undone.
+- Roll on a phone, on the board, or with physical dice keyed in.
+- Trades: talk it out, then send the deal to one player. Bank and harbor trades are on your own phone.
+- The 7: discards at the same time on every phone, the thief moved on the board, the victim picked on the phone, and a pick among the victim's shuffled face-down cards.
+- Each player has a panel at their edge with public points, card counts, knights and badges.
+- Landscape phones with cards fanned in an arc.
+- An automatic win at 10 with a reveal, then Rematch.
+
+**Milestones**
+6. Local server and joining: `npm run table`, the Mode choice, QR code, seat claiming, seat keys, rejoin, the save file.
+7. Rules engine: setup placement, rolling, production, building with ✓ / ✗ and undo, bank, harbor and player trades, player panels, the phone hand.
+8. The 7: discards, the thief, face-down steals.
+9. Development cards, Largest Army, Longest Road, winning, the end screen.
+10. 5–6 players with the special build phase, and the double-click exe.
+
+## Assumptions (session 2)
+
+- The animation levels and the text rotation work the same in both modes.
+- Drawn roads, settlements and cities use original art in the seat colors.
+- An action log on the phones, and brief toasts on the board.
+- No turn timer and no sounds.
+- The same rule as session 1: no official names, logo or artwork.
