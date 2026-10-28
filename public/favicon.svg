@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0a1626"/>
+  <circle cx="256" cy="256" r="236" fill="#1b5f93"/>
+  <g stroke="#2b2418" stroke-width="5" stroke-linejoin="round">
+    <polygon points="377.2,188.0 436.1,222.0 436.1,290.0 377.2,324.0 318.4,290.0 318.4,222.0" fill="#a3a7b5"/>
+    <polygon points="316.6,293.0 375.5,327.0 375.5,395.0 316.6,429.0 257.7,395.0 257.7,327.0" fill="#ecd9a6"/>
+    <polygon points="195.4,293.0 254.3,327.0 254.3,395.0 195.4,429.0 136.5,395.0 136.5,327.0" fill="#3f8f3a"/>
+    <polygon points="134.8,188.0 193.6,222.0 193.6,290.0 134.8,324.0 75.9,290.0 75.9,222.0" fill="#3f8f3a"/>
+    <polygon points="195.4,83.0 254.3,117.0 254.3,185.0 195.4,219.0 136.5,185.0 136.5,117.0" fill="#f2d15a"/>
+    <polygon points="316.6,83.0 375.5,117.0 375.5,185.0 316.6,219.0 257.7,185.0 257.7,117.0" fill="#d8743c"/>
+    <polygon points="256.0,188.0 314.9,222.0 314.9,290.0 256.0,324.0 197.1,290.0 197.1,222.0" fill="#9fdc6a"/>
+  </g>
+  <circle cx="256" cy="256" r="34" fill="#f4e7c5" stroke="#8a6d3b" stroke-width="5"/>
+  <text x="256" y="272" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="44" font-weight="800" fill="#c8231b">8</text>
+</svg>

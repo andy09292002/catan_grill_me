@@ -2,6 +2,10 @@ import { generateBoard, type Board, type RandomMode } from './board/generate';
 import type { BoardSize } from './board/layout';
 import { randomSeed } from './board/rng';
 import { drawBoard } from './render/draw';
+import { registerSW } from 'virtual:pwa-register';
+
+// Caches the app for offline use and picks up new versions on the next launch.
+registerSW({ immediate: true });
 
 // Milestone 1 keeps settings in the URL (?size=30&mode=balancedPlus&seed=123) so any
 // board can be reproduced. Milestone 3 replaces this with the New game screen and saving.
