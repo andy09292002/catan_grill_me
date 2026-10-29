@@ -47,8 +47,8 @@ while (t.rules.phase === 'setup') {
 }
 t = withHands(t, [{ wood: 3, brick: 2, wool: 1, grain: 4, ore: 2 }, { wood: 3, grain: 3, ore: 2 }, { wool: 2 }]);
 const keys = ['key-red', 'key-blue', 'key-white'];
-const save = (table: Table) => {
-  const saved: SavedTable = { version: 3, id: 'shots', started: true, game: table.game, rules: table.rules, keys };
+const save = (table: Table, seatKeys = keys) => {
+  const saved: SavedTable = { version: 4, id: 'shots', started: true, game: table.game, rules: table.rules, keys: seatKeys };
   writeFileSync(join(saveDir, 'game.json'), JSON.stringify(saved));
 };
 
@@ -66,8 +66,8 @@ function withDev(table: Table, seat: number, cards: DevCard[], bought = 0): Tabl
   return { ...table, rules: { ...table.rules, deck, devCards } };
 }
 
-async function withServer(table: Table, shoot: (open: Open) => Promise<void>) {
-  save(table);
+async function withServer(table: Table, shoot: (open: Open) => Promise<void>, seatKeys = keys) {
+  save(table, seatKeys);
   const contexts: import('@playwright/test').BrowserContext[] = [];
   const server = spawn(process.execPath, ['--import', 'tsx', 'server/table.ts'], { env: { ...process.env, PORT: String(PORT), HEX_BOARD_SAVE: saveDir }, stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise<void>((resolve) => server.stdout.on('data', (d) => String(d).includes('table is running') && resolve()));
@@ -82,7 +82,7 @@ async function withServer(table: Table, shoot: (open: Open) => Promise<void>) {
       }
       const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
       contexts.push(ctx);
-      await ctx.addInitScript((k) => localStorage.setItem('hex-board/seat', JSON.stringify({ tableId: 'shots', key: k })), keys[seat]);
+      await ctx.addInitScript((k) => localStorage.setItem('hex-board/seat', JSON.stringify({ tableId: 'shots', key: k })), seatKeys[seat]);
       const page = await ctx.newPage();
       await page.goto(`http://localhost:${PORT}/phone.html`);
       return page;
@@ -154,6 +154,29 @@ try {
     await board.getByText('Red wins!').waitFor();
     await board.screenshot({ path: `${out}/win-board.png` });
   });
+  // Five players on the big board: after Red's turn, Blue's special build.
+  let big = startTable(
+    createGame({ colors: ['red', 'blue', 'white', 'orange', 'green'], firstSeat: 0, size: 30, mode: 'balanced', seed: 99, thiefStyle: 'onscreen' }),
+  );
+  while (big.rules.phase === 'setup') {
+    const seat = big.game.current;
+    for (const kind of ['settlement', 'road'] as const) {
+      big = act(big, seat, { type: 'build', kind });
+      big = act(big, seat, { type: 'pick', at: legalPlaces(big, seat, kind)[0] });
+      big = act(big, seat, { type: 'confirm' });
+    }
+  }
+  big = act(act(big, 0, { type: 'enterRoll', total: 5 }), 0, { type: 'endTurn' });
+  const bigKeys = [...keys, 'key-orange', 'key-green'];
+  await withServer(big, async (open) => {
+    const blue = await open(1);
+    await blue.getByRole('button', { name: 'Done building' }).waitFor();
+    await blue.screenshot({ path: `${out}/special-blue.png` });
+    const board = await open('board');
+    await board.locator('#robber-note:not([hidden])').waitFor();
+    await board.waitForTimeout(700);
+    await board.screenshot({ path: `${out}/special-board.png` });
+  }, bigKeys);
   console.log(`Screenshots saved to ${out}/`);
 } finally {
   await browser.close();

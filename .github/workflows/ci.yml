@@ -30,3 +30,24 @@ jobs:
         with:
           name: screenshots
           path: screenshots/
+
+  # HexBoard.exe: built on Windows, checked with the same board-and-phones run, kept as a download.
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run exe
+      - run: npx playwright install chromium
+      - run: node scripts/table.mjs
+        env:
+          TABLE_EXE: build/exe/HexBoard.exe
+          SCREENSHOT_BROWSER: chromium
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HexBoard-exe
+          path: build/exe/HexBoard.exe

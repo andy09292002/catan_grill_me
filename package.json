@@ -11,13 +11,16 @@
     "test:watch": "vitest",
     "screenshots": "node scripts/screenshots.mjs",
     "table": "vite build && tsx server/table.ts",
-    "table:only": "tsx server/table.ts"
+    "table:only": "tsx server/table.ts",
+    "exe": "vite build && node scripts/build-exe.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.6",
     "@types/qrcode": "^1.5.6",
     "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6",
     "qrcode": "^1.5.4",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",

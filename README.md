@@ -16,8 +16,8 @@ The full design and every decision behind it are in [grillMe.md](grillMe.md).
 | 6 | Board + phones: local table server, joining by QR code, seat keys and rejoin | Done |
 | 7 | Board + phones: rules engine, building, trading, the phone hand | Done |
 | 8 | Board + phones: the 7, discards, the thief and face-down steals | Done |
-| 9 | Board + phones: development cards, Largest Army, Longest Road, winning | In review |
-| 10 | Board + phones: 5–6 players, special build phase, a double-click exe | Planned |
+| 9 | Board + phones: development cards, Largest Army, Longest Road, winning | Done |
+| 10 | Board + phones: 5–6 players, special build phase, a double-click exe | In review |
 
 The Board + phones design is recorded in `grillMe.md` (session 2).
 
@@ -57,6 +57,10 @@ Open the printed URL, drag the browser window onto the touch monitor and press F
 
 In this mode each player's phone holds their hidden cards, and the PC runs the game. It needs the table server running on the PC; the GitHub Pages site can only play Board only.
 
+**The easy way: HexBoard.exe.** Double-click it. A window opens with the addresses, and the board opens in your browser. Close the window to stop. Games are saved in `%APPDATA%\Hex Board`, so the next double-click carries on. No Node.js or npm needed. Each CI run on GitHub keeps a fresh `HexBoard-exe` download (Actions → the run → Artifacts), or build it yourself with `npm run exe` (into `build/exe/`). The exe isn't code-signed, so the first time Windows may show "Windows protected your PC": click **More info → Run anyway**. Then allow it through the firewall on **private networks**, as below.
+
+**From the source:**
+
 ```bash
 npm run table
 ```
@@ -87,10 +91,11 @@ Some routers also keep devices apart ("AP isolation" or a guest network); use th
 - **Development cards.** After rolling, **Card** buys one (a wool, a grain and an ore). **Cards** on your phone lists yours: play one a turn, at any time in your turn, even before rolling, but not on the turn you bought it. A **knight** moves the thief and takes a card, as after a 7 but with no discards; **road building** gives two free roads (**Place free road** on your phone); **year of plenty** takes any two cards from the bank; **monopoly** takes every card of one kind from everyone else. **Victory point** cards count by themselves and stay secret until the end.
 - **Longest Road and Largest Army.** The first to a run of 5 roads, or 3 knights played, gets 2 points, and keeps them until someone has strictly more. Another player's settlement can break a road; if that leaves a tie at the top, nobody holds it. Both show on the player's panel.
 - **Winning.** The moment the current player reaches 10 points, counting their secret victory point cards, the game ends. The board shows the final scores with every hidden card revealed, and each phone shows them too. **Rematch** keeps every phone in its seat and goes straight to setup; **New game** starts over.
+- **5–6 players** play on the 30-hex board with a bank of 24 of each card and a 34-card development deck (20 knights, 3 each of road building, year of plenty and monopoly, 5 victory points). After each turn comes a **special build phase**: every other player in turn, clockwise, may build and buy development cards (no trading, no playing cards), then taps **Done building**. The note at their edge of the board shows whose it is. Points reached then only win on that player's own turn.
 - **End turn** on your phone, or **Next turn** on the board.
 - Your phone, held sideways, shows your cards fanned like a hand. The panel at your edge of the board shows the other players your points and how many cards you hold (it faces into the table, since your phone already shows you), and glows red over 7.
 
-Still to come: 5–6 players with the special build phase, and a double-click exe, in milestone 10. In Board + phones the thief moves only after a 7 or a knight, so the board's **Thief** button is hidden.
+In Board + phones the thief moves only after a 7 or a knight, so the board's **Thief** button is hidden.
 
 A URL like `?size=30&mode=balancedPlus&seed=12345&players=5&thief=physical` opens a fixed board for testing or sharing without touching the saved game. Modes are `random`, `balanced` and `balancedPlus`.
 
@@ -102,6 +107,8 @@ npm run build
 npm run screenshots
 node scripts/table.mjs
 ```
+
+`TABLE_EXE=build/exe/HexBoard.exe node scripts/table.mjs` runs the same check against the exe; CI builds the exe on Windows and does this on every push.
 
 `node scripts/table.mjs` also needs a build. It starts the table server on a spare port, opens the board and three phones in separate browsers, and checks joining, setup with pieces started on the phones and placed on the board, rolling from a phone, the trade sheet, ending a turn, a 7 keyed in from physical dice with the thief moved on the board and a face-down card taken, a dropped phone coming back, moving a seat with the rejoin code, a server restart, and the sideways prompt. Its screenshots go to `screenshots/table/`.
 
@@ -133,4 +140,6 @@ The app icons in `public/` are rendered from `public/favicon.svg` with `node scr
 - `scripts/screenshots.mjs` – headless screenshots at several screen sizes
 - `scripts/perf.mjs` – frame draw times at each animation level
 - `scripts/table.mjs` – end-to-end check of a board with three phones
+- `scripts/phone-shots.ts` – phone (and board) screenshots from prepared games
+- `scripts/build-exe.mjs` – packs the table server and the built app into `HexBoard.exe`
 - `.github/workflows/` – CI on every push, and the GitHub Pages deploy on `main`

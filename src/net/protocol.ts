@@ -38,6 +38,8 @@ export interface PublicRules {
   /** A build waiting on the board: where it may go and the spot tapped so far. */
   pending: { seat: number; kind: BuildKind; legal: number[]; at: number | null } | null;
   robber: PublicRobber | null;
+  /** With 5–6 players, set while the others build after `turnOf`'s turn. */
+  special: { turnOf: number } | null;
   /** How many development cards each seat holds, face down. */
   devCards: number[];
   deckLeft: number;
@@ -117,6 +119,7 @@ export interface PhoneView {
   /** A trade offer this phone made or was sent. */
   offer: TradeOffer | null;
   robber: PublicRobber | null;
+  special: { turnOf: number } | null;
   /** Only for the victim: their own cards in the face-down order, so they see which one goes. */
   myOrder: Resource[] | null;
   /** The last card taken, if this phone took it or lost it. */
