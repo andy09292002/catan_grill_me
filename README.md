@@ -84,7 +84,7 @@ Some routers also keep devices apart ("AP isolation" or a guest network); use th
 - **Building.** After rolling, your phone shows **Road**, **Settlement** and **City** with their costs; the ones you can afford light up. Pick one, then place it on the board as in setup. **Undo last** takes back your last piece until anything else happens. Buying and trades are final.
 - **Trading.** Talk it out, then on your phone tap **Trade**: either the **Bank** (4 for 1, or 3 or 2 for 1 with a harbor; your rates are shown) or another player, choosing what you give and get. They tap **Accept** or **Decline** on theirs.
 - **End turn** on your phone, or **Next turn** on the board.
-- Your phone, held sideways, shows your cards fanned like a hand. The panel at your edge of the board shows everyone your points and how many cards you hold, and glows red over 7.
+- Your phone, held sideways, shows your cards fanned like a hand. The panel at your edge of the board shows the other players your points and how many cards you hold (it faces into the table, since your phone already shows you), and glows red over 7.
 
 Still to come: a 7 only lets you move the thief for now (discarding and stealing arrive in milestone 8); development cards, Largest Army, Longest Road and the win in milestone 9.
 

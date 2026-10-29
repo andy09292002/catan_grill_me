@@ -15,8 +15,9 @@ export interface SeatStats {
 const SAFE_HAND = 7;
 
 /**
- * A panel at each player's edge of the screen, facing them: points, how many cards they hold,
- * and whether their phone is connected. Tapping one offers to move that seat to another phone.
+ * A panel at each player's edge of the screen: points, how many cards they hold, and whether
+ * their phone is connected. It faces into the table, so the other players read it; its owner
+ * sees the same on their phone. Tapping one offers to move that seat to another phone.
  */
 export function renderSeatBadges(container: HTMLElement, seats: SeatView[] | null, stats: SeatStats[], onTap: (seat: number) => void) {
   container.replaceChildren();
@@ -25,6 +26,8 @@ export function renderSeatBadges(container: HTMLElement, seats: SeatView[] | nul
   const hh = window.innerHeight / 2;
   seats.forEach((s, seat) => {
     const a = seatAngle(seat, seats.length);
+    // Upside down for its owner, upright for the players across the table.
+    const facing = a + 180;
     const d = seatDirection(a);
     const st = stats[seat];
     const over = !!st && st.cards > SAFE_HAND;
@@ -33,7 +36,7 @@ export function renderSeatBadges(container: HTMLElement, seats: SeatView[] | nul
       {
         type: 'button',
         class: `seat-badge${s.connected ? '' : ' away'}${over ? ' over' : ''}`,
-        style: `transform:translate(-50%,-50%) rotate(${a}deg);--player:${PLAYER_HEX[s.color]}`,
+        style: `transform:translate(-50%,-50%) rotate(${facing}deg);--player:${PLAYER_HEX[s.color]}`,
         'aria-label': `${PLAYER_NAMES[s.color]}: ${st ? `${st.points} points, ${st.cards} cards, ` : ''}${s.connected ? 'phone connected' : 'no phone'}. Tap to move to another phone`,
       },
       el('span', { class: 'dot' }),
