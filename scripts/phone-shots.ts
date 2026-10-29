@@ -51,18 +51,24 @@ const browser = await chromium.launch({ channel: process.env.SCREENSHOT_BROWSER 
 
 async function withServer(table: Table, shoot: (open: (seat: number) => Promise<import('@playwright/test').Page>) => Promise<void>) {
   save(table);
+  const contexts: import('@playwright/test').BrowserContext[] = [];
   const server = spawn(process.execPath, ['--import', 'tsx', 'server/table.ts'], { env: { ...process.env, PORT: String(PORT), HEX_BOARD_SAVE: saveDir }, stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise<void>((resolve) => server.stdout.on('data', (d) => String(d).includes('table is running') && resolve()));
   try {
     await shoot(async (seat) => {
       const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+      contexts.push(ctx);
       await ctx.addInitScript((k) => localStorage.setItem('hex-board/seat', JSON.stringify({ tableId: 'shots', key: k })), keys[seat]);
       const page = await ctx.newPage();
       await page.goto(`http://localhost:${PORT}/phone.html`);
       return page;
     });
   } finally {
+    // Close this round's phones first, or they reconnect to the next round's server with the
+    // same seat keys and keep bumping the new phones off their seats.
+    await Promise.all(contexts.map((c) => c.close()));
     server.kill();
+    await new Promise((r) => server.once('exit', r));
   }
 }
 
