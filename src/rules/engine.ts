@@ -118,6 +118,8 @@ export interface Steal {
   from: number;
   to: number;
   card: Resource;
+  /** Where the card lay in the face-down row, counting from the left. */
+  index: number;
 }
 
 export interface LogEntry {
@@ -542,7 +544,7 @@ function act(t: Table, seat: number, action: Action, roll: () => Dice, random: R
       const rules = move(r, rb.victim, seat, hand({ [card]: 1 }));
       const other = PLAYER_NAMES[t.game.colors[rb.victim]];
       return done(
-        { ...t, rules: log({ ...rules, robber: null, lastSteal: { from: rb.victim, to: seat, card } }, seat, `${name} took a card from ${other}`) },
+        { ...t, rules: log({ ...rules, robber: null, lastSteal: { from: rb.victim, to: seat, card, index: action.index } }, seat, `${name} took a card from ${other}`) },
         'robber',
       );
     }
@@ -863,7 +865,7 @@ export function isRulesState(r: unknown, game: GameState): r is RulesState {
         s.robber.owed.length === n &&
         Array.isArray(s.robber.victims) &&
         Array.isArray(s.robber.order))) &&
-    (s.lastSteal === null || (typeof s.lastSteal === 'object' && RESOURCES.includes(s.lastSteal.card))) &&
+    (s.lastSteal === null || (typeof s.lastSteal === 'object' && RESOURCES.includes(s.lastSteal.card) && Number.isInteger(s.lastSteal.index))) &&
     Array.isArray(s.deck) &&
     Array.isArray(s.devCards) &&
     s.devCards.length === n &&

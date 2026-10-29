@@ -28,7 +28,8 @@ export interface GameState {
   thiefTile: number | null;
 }
 
-export const HISTORY_LIMIT = 60;
+/** Enough for a whole game, so the roll chart counts every roll. */
+export const HISTORY_LIMIT = 1000;
 
 export interface NewGameOptions {
   colors: PlayerColor[];

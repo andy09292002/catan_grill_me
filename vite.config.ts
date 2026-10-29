@@ -33,6 +33,15 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
       },
     }),
+    {
+      // Added to the home screen, the phone page should open itself, sideways and full screen, not the board.
+      name: 'phone-manifest',
+      enforce: 'post',
+      generateBundle(_, bundle) {
+        const page = bundle['phone.html'];
+        if (page?.type === 'asset') page.source = String(page.source).replace('manifest.webmanifest', 'phone.webmanifest');
+      },
+    },
   ],
   test: {
     include: ['src/**/*.test.ts', 'server/**/*.test.ts'],

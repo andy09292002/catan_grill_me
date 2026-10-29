@@ -509,7 +509,7 @@ describe('the 7', () => {
     const card = order[1];
     expect(t.rules.hands[0][card]).toBe(base.rules.hands[0][card] + 1);
     expect(t.rules.hands[2][card]).toBe(0);
-    expect(t.rules.lastSteal).toEqual({ from: 2, to: 0, card });
+    expect(t.rules.lastSteal).toEqual({ from: 2, to: 0, card, index: 1 });
     expect(t.rules.robber).toBeNull();
     expect(cardsInPlay(t)).toEqual(RESOURCES.map(() => BANK_EACH));
     // The game goes on: build, trade or end the turn.

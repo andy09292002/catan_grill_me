@@ -69,6 +69,10 @@ let offerGet = hand();
 let discardDraft = hand();
 /** The last steal this phone was told about, so it's announced once. */
 let stolenKey = '';
+/** Your cards as the thief saw them face down, kept to show which one went. */
+let lastOrder: Resource[] | null = null;
+/** How many face-down cards you were picking from, kept to show which one you took. */
+let lastBacks = 0;
 
 const socket = openSocket(
   () => {
@@ -99,6 +103,8 @@ function onMessage(msg: ServerMessage) {
       if (sheet === 'trade' && !view.me?.can.trade) sheet = null;
       if (sheet === 'pad' && !view.me?.can.roll) sheet = null;
       if (!view.robber || view.robber.stage !== 'discard') discardDraft = hand();
+      if (view.myOrder) lastOrder = view.myOrder;
+      if (view.robber?.stage === 'steal' && view.current === view.you) lastBacks = view.robber.count;
       announceSteal(view);
       break;
     case 'noTable':
@@ -128,8 +134,28 @@ function announceSteal(v: PhoneView) {
     return;
   }
   stolenKey = key;
-  const card = RESOURCE_NAMES[s.card];
-  toast(s.to === v.you ? `You took ${card} from ${colorName(v, s.from)}` : `${colorName(v, s.to)} took your ${card}`, s.to === v.you ? 'good' : 'bad');
+  const name = RESOURCE_NAMES[s.card];
+  const title = s.to === v.you ? `You took ${name} from ${colorName(v, s.from)}` : `${colorName(v, s.to)} took your ${name}`;
+  // The row as it was, with the taken card lifting out of it: face down for the thief, turning over.
+  let row: HTMLElement[] | null = null;
+  if (s.to === v.you && s.index < lastBacks) {
+    row = Array.from({ length: lastBacks }, (_, i) =>
+      i === s.index ? el('div', { class: 'flip taken' }, el('div', { class: 'flip-inner' }, el('div', { class: 'card-back' }), card(s.card))) : el('div', { class: 'card-back' }),
+    );
+  } else if (s.from === v.you && lastOrder?.[s.index] === s.card) {
+    row = lastOrder.map((r, i) => {
+      const c = card(r);
+      if (i === s.index) c.classList.add('taken', 'leaving');
+      return c;
+    });
+  }
+  lastOrder = null;
+  lastBacks = 0;
+  if (!row) return toast(title, s.to === v.you ? 'good' : 'bad');
+  const replay = el('div', { class: `steal-replay ${s.to === v.you ? 'good' : 'bad'}`, role: 'status' }, el('div', { class: 'sheet steal' }, el('h2', {}, title), el('div', { class: 'backs' }, ...row)));
+  replay.addEventListener('click', () => replay.remove());
+  document.body.append(replay);
+  window.setTimeout(() => replay.remove(), 2600);
 }
 
 function render() {
@@ -143,7 +169,7 @@ function render() {
     const free = v.seats.map((s, seat) => ({ ...s, seat })).filter((s) => !s.claimed);
     if (!free.length) return show(screen('All seats are taken', 'To take over a seat, tap it on the board and scan its code.'));
     const buttons = free.map((s) => button(PLAYER_NAMES[s.color], 'pick', () => socket.send({ type: 'claim', seat: s.seat }), `--player:${PLAYER_HEX[s.color]}`));
-    return show(el('section', { class: 'screen' }, el('h1', {}, 'Pick your color'), el('div', { class: 'picks' }, ...buttons)));
+    return show(el('section', { class: 'screen' }, el('h1', {}, 'Pick your color'), el('div', { class: 'picks' }, ...buttons), homeScreenTip()));
   }
 
   const me = v.seats[v.you];
@@ -152,7 +178,7 @@ function render() {
   if (!v.started || !v.me) {
     const joined = v.seats.filter((s) => s.claimed).length;
     const status = joined < v.seats.length ? `Waiting for players · ${joined} of ${v.seats.length} joined` : 'Everyone is in. Start the game on the board.';
-    return show(el('section', { class: 'screen seated' }, el('div', { class: 'me' }, el('span', { class: 'dot' }), PLAYER_NAMES[me.color]), el('h1', {}, status)));
+    return show(el('section', { class: 'screen seated' }, el('div', { class: 'me' }, el('span', { class: 'dot' }), PLAYER_NAMES[me.color]), el('h1', {}, status), homeScreenTip()));
   }
 
   show(
@@ -267,6 +293,7 @@ function plentySheet() {
       'div',
       { class: 'sheet' },
       el('h2', {}, 'Year of plenty: take two cards'),
+      haveLine(view!.me!.hand),
       el('div', { class: 'trade-line' }, ...pickRow),
       el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'Taking'), ...plentyPicks.map((r) => chip(r, 1))),
       el('div', { class: 'row' }, button('Back', 'secondary', () => ((plentyPicks = []), (sheet = 'cards'), render())), ok),
@@ -289,6 +316,7 @@ function monopolySheet() {
       'div',
       { class: 'sheet' },
       el('h2', {}, 'Monopoly: which card does everyone give you?'),
+      haveLine(view!.me!.hand),
       el('div', { class: 'trade-line' }, ...choices),
       el('div', { class: 'row' }, button('Back', 'secondary', () => ((sheet = 'cards'), render()))),
     ),
@@ -344,6 +372,7 @@ function topBar(v: PhoneView) {
     ),
     el('span', { class: 'status' }, status),
     !connected && el('span', { class: 'warn' }, 'Reconnecting…'),
+    canFullscreen() && !document.fullscreenElement ? fullscreenButton() : null,
     v.lastRoll && el('span', { class: `last-roll${v.lastRoll.total === 6 || v.lastRoll.total === 8 ? ' red' : ''}` }, String(v.lastRoll.total)),
   );
 }
@@ -455,6 +484,7 @@ function offerOverlay(v: PhoneView) {
       'div',
       { class: 'sheet offer' },
       el('h2', {}, `${colorName(v, o.from)} offers a trade`),
+      haveLine(mine),
       el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You get'), ...costChips(o.give)),
       el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You give'), ...costChips(o.get)),
       !canPay && el('p', { class: 'hint' }, 'You don’t have those cards.'),
@@ -480,6 +510,7 @@ function robberOverlay(v: PhoneView) {
         'div',
         { class: 'sheet discard' },
         el('h2', {}, `A 7! Discard ${owed} of your ${handSize(me.hand)} cards`),
+        haveLine(me.hand, discardDraft),
         el('div', { class: 'trade-line' }, ...RESOURCES.map((r) => stepper(r, discardDraft, picked < owed ? me.hand[r] : discardDraft[r]))),
         el('div', { class: 'row' }, el('span', { class: 'count' }, `${picked} of ${owed} picked`), ok),
       ),
@@ -487,7 +518,10 @@ function robberOverlay(v: PhoneView) {
   }
   if (rb.stage === 'steal' && v.current === v.you) {
     const backs = Array.from({ length: rb.count }, (_, index) => {
-      const b = button('', 'card-back', () => act({ type: 'steal', index }));
+      const b = button('', 'card-back', () => {
+        b.classList.add('taken');
+        act({ type: 'steal', index });
+      });
       b.setAttribute('aria-label', `Card ${index + 1}`);
       return b;
     });
@@ -552,7 +586,20 @@ function tradeSheet(v: PhoneView) {
       el('div', { class: 'row' }, button('Close', 'secondary', close), send),
     ];
   }
-  return el('div', { class: 'sheet-back' }, el('div', { class: 'sheet trade' }, el('div', { class: 'segs' }, ...targets), ...body));
+  return el('div', { class: 'sheet-back' }, el('div', { class: 'sheet trade' }, el('div', { class: 'segs' }, ...targets), haveLine(me.hand), ...body));
+}
+
+/** What's in your hand, for the sheets that cover it; with `less`, what's left once those go. */
+function haveLine(h: Hand, less?: Hand) {
+  return el(
+    'div',
+    { class: 'have' },
+    el('span', { class: 'label' }, less && handSize(less) ? 'You keep' : 'You have'),
+    ...RESOURCES.map((r) => {
+      const n = h[r] - (less?.[r] ?? 0);
+      return el('span', { class: `have-item${n ? '' : ' none'}` }, chip(r, 1), el('b', {}, String(n)));
+    }),
+  );
 }
 
 function stepper(r: Resource, h: Hand, max: number) {
@@ -602,6 +649,43 @@ function button(label: string, cls: string, onClick: () => void, style = '') {
   b.addEventListener('click', onClick);
   return b;
 }
+
+/** Opened from the home screen, there's no address bar to hide. */
+function installed(): boolean {
+  return matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+}
+
+function canFullscreen(): boolean {
+  return document.fullscreenEnabled && !installed();
+}
+
+/** Hides the address bar (Android browsers) and keeps the phone sideways. */
+function goFullscreen() {
+  if (!canFullscreen() || document.fullscreenElement) return;
+  document.documentElement
+    .requestFullscreen({ navigationUI: 'hide' })
+    .then(() => (window.screen.orientation as { lock?: (o: string) => Promise<void> }).lock?.('landscape'))
+    .catch(() => {
+      // Not allowed here; the page still works with the address bar.
+    });
+}
+
+function fullscreenButton() {
+  const b = button('', 'icon fullscreen', goFullscreen);
+  b.setAttribute('aria-label', 'Full screen');
+  b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>';
+  return b;
+}
+
+/** Browsers that can't go full screen (Safari on iPhone) can run the page from the home screen instead. */
+function homeScreenTip() {
+  if (document.fullscreenEnabled || installed()) return null;
+  return el('p', { class: 'hint tip' }, 'No address bar: in the browser’s Share menu, tap Add to Home Screen, then open Hex Board from there.');
+}
+
+// The first tap anywhere goes full screen where the browser allows it.
+document.addEventListener('pointerup', goFullscreen, { once: true });
+document.addEventListener('fullscreenchange', render);
 
 function screen(title: string, hint: string) {
   return el('section', { class: 'screen' }, el('h1', {}, title), el('p', { class: 'hint' }, hint));

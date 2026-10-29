@@ -25,6 +25,7 @@ import { confirmDialog } from './ui/confirm';
 import { openPad } from './ui/pad';
 import { showFinish, type FinishHandle } from './ui/finish';
 import { showLobby, showRejoin, type LobbyHandle } from './ui/lobby';
+import { renderRollChart } from './ui/rolls';
 import { placeAtEdge, renderSeatBadges } from './ui/seats';
 import { FIRST_LAUNCH_DEFAULTS, openSetup, type PlayMode } from './ui/setup';
 import type { BoardView, ServerMessage } from './net/protocol';
@@ -266,6 +267,8 @@ function updateControls() {
       return chip;
     }),
   );
+  // The chart waits for the dice too.
+  renderRollChart(document.querySelector('#roll-chart')!, rolling ? { ...game, history: game.history.slice(1) } : game);
 }
 
 /** Banner placement: from the screen centre towards the current player's side, turned to face them. */

@@ -752,3 +752,64 @@ body {
 .finish-scores .pts {
   font-size: 26px;
 }
+
+/* Roll chart, beside the last roll */
+
+.roll-chart {
+  width: calc(var(--control-size) * 2.3);
+  height: calc(var(--control-size) * 1.9);
+  border-radius: 14px;
+  background: var(--panel);
+  border: 2px solid var(--panel-edge);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.roll-chart-inner {
+  width: 92%;
+}
+.roll-chart-inner svg {
+  width: 100%;
+  display: block;
+}
+.rc-title {
+  fill: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rc-bar {
+  fill: #6f9cc8;
+}
+.rc-bar.hot {
+  fill: var(--red);
+}
+.rc-bar.seven {
+  fill: #8a8f98;
+}
+.rc-count,
+.rc-label {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  text-anchor: middle;
+}
+.rc-label {
+  font-size: 12px;
+}
+.rc-label.hot {
+  fill: var(--red);
+}
+.rc-axis {
+  stroke: var(--panel-edge);
+  stroke-width: 1;
+}
+.rc-fair {
+  fill: none;
+  stroke: #ffd65a;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  stroke-linejoin: round;
+}
