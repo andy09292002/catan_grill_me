@@ -3,6 +3,7 @@
 // placing them on the board, rolls, opens a trade, ends a turn, drops and moves a phone, and
 // restarts the server. Fails on the first thing that's wrong; saves screenshots to screenshots/table/.
 // Needs a build first (`npm run build`). Run: node scripts/table.mjs
+// Against the exe (after `npm run exe`): TABLE_EXE=build/exe/HexBoard.exe node scripts/table.mjs
 
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
@@ -16,8 +17,10 @@ const out = 'screenshots/table';
 mkdirSync(out, { recursive: true });
 const saveDir = mkdtempSync(join(tmpdir(), 'hex-table-'));
 
+/** The source server by default; set TABLE_EXE to the built HexBoard.exe to check that instead. */
 function startServer() {
-  const child = spawn(process.execPath, ['--import', 'tsx', 'server/table.ts'], {
+  const exe = process.env.TABLE_EXE;
+  const child = spawn(exe ?? process.execPath, exe ? ['--no-open'] : ['--import', 'tsx', 'server/table.ts'], {
     env: { ...process.env, PORT: String(PORT), HEX_BOARD_SAVE: saveDir },
     stdio: ['ignore', 'pipe', 'inherit'],
   });

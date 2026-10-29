@@ -505,28 +505,34 @@ function closeFinish() {
 }
 
 /**
- * Keeps the note at the roller's edge in step with a 7: who still has to discard, then the
- * move and the steal. It sits at the edge so it never covers the tiles being chosen.
+ * Keeps the note at the current player's edge in step with a 7 (who still has to discard,
+ * then the move and the steal) or a special build phase. It sits at the edge so it never
+ * covers the tiles being chosen.
  */
 function syncRobber() {
   const note = document.querySelector<HTMLElement>('#robber-note')!;
   const rb = remote?.started ? remote.rules.robber : null;
-  const key = rb ? `${rb.stage}:${rb.owed.join()}:${rb.victim}:${angleTo}` : '';
+  const special = remote?.started && !rb ? remote.rules.special : null;
+  const key = rb ? `${rb.stage}:${rb.owed.join()}:${rb.victim}:${angleTo}` : special ? `special:${remote!.game.current}:${angleTo}` : '';
   if (key === robberKey) return;
   robberKey = key;
-  note.hidden = !rb;
-  if (!rb || !remote || !game) return;
+  note.hidden = !rb && !special;
+  if ((!rb && !special) || !remote || !game) return;
   const name = (seat: number) => PLAYER_NAMES[game!.colors[seat]];
   const roller = name(remote.game.current);
-  const captions = {
-    discard: `Discard on your phones: ${rb.owed.flatMap((n, s) => (n > 0 ? [`${name(s)} ${n}`] : [])).join(' · ')}`,
-    move: `${roller}: tap a tile to move the thief, then ✓`,
-    choose: `${roller} is choosing whom to rob`,
-    steal: `${roller} is taking a card from ${rb.victim === null ? '' : name(rb.victim)}`,
-  };
-  note.textContent = captions[rb.stage];
+  if (rb) {
+    const captions = {
+      discard: `Discard on your phones: ${rb.owed.flatMap((n, s) => (n > 0 ? [`${name(s)} ${n}`] : [])).join(' · ')}`,
+      move: `${roller}: tap a tile to move the thief, then ✓`,
+      choose: `${roller} is choosing whom to rob`,
+      steal: `${roller} is taking a card from ${rb.victim === null ? '' : name(rb.victim)}`,
+    };
+    note.textContent = captions[rb.stage];
+  } else {
+    note.textContent = `Special build after ${name(special!.turnOf)}'s turn: ${roller} may build or buy a card`;
+  }
   note.style.transform = `translate(-50%, -50%) rotate(${angleTo}deg)`;
-  // Just inside the roller's own panel.
+  // Just inside the player's own panel.
   placeAtEdge(note, angleTo, 56);
 }
 

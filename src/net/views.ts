@@ -61,6 +61,7 @@ export function publicRules(t: Table): PublicRules {
       at: r.pending.at,
     },
     robber: publicRobber(t),
+    special: r.special && { turnOf: r.special.turnOf },
     devCards: r.devCards.map((h) => h.length),
     deckLeft: r.deck.length,
     knights: r.knights,
@@ -99,15 +100,15 @@ export function phoneMe(t: Table, seat: number): PhoneMe {
     build: Object.fromEntries(kinds.map((k) => [k, works(t, seat, { type: 'build', kind: k })])) as Record<BuildKind, boolean>,
     cancel: works(t, seat, { type: 'cancel' }),
     undo: works(t, seat, { type: 'undo' }),
-    trade: mine && r.phase === 'main' && r.rolled && !r.pending && !r.robber,
+    trade: mine && r.phase === 'main' && r.rolled && !r.pending && !r.robber && !r.special,
     endTurn: works(t, seat, { type: 'endTurn' }),
     buyCard: works(t, seat, { type: 'buyCard' }),
     play: {
       knight: works(t, seat, { type: 'playCard', card: 'knight' }),
       roads: works(t, seat, { type: 'playCard', card: 'roads' }),
       // Checked without the cards to take, which are chosen on the phone afterwards.
-      plenty: mine && r.phase === 'main' && !r.pending && !r.robber && !r.playedDev && canPlay(t, seat, 'plenty'),
-      monopoly: mine && r.phase === 'main' && !r.pending && !r.robber && !r.playedDev && canPlay(t, seat, 'monopoly'),
+      plenty: mine && r.phase === 'main' && !r.pending && !r.robber && !r.special && !r.playedDev && canPlay(t, seat, 'plenty'),
+      monopoly: mine && r.phase === 'main' && !r.pending && !r.robber && !r.special && !r.playedDev && canPlay(t, seat, 'monopoly'),
     },
   };
   return {

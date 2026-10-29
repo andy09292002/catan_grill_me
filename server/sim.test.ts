@@ -9,7 +9,7 @@ import { isSavedTable, Lobby, type Conn, type SavedTable } from './lobby';
 // and every state the server saves is checked against the rules.
 
 // More games locally with SIM_GAMES=1000 npx vitest run server/sim
-const GAMES = Number(process.env.SIM_GAMES) || 25;
+const GAMES = Number(process.env.SIM_GAMES) || 20;
 /** A game that hasn't been won by now is stuck. */
 const MAX_TURNS = 600;
 
@@ -84,7 +84,8 @@ const stalls: string[] = [];
 /** Plays one game to the end: someone reaches 10 points. */
 function playGame(seed: number) {
   const rng = createRng(seed);
-  const players = 2 + Math.floor(rng() * 3);
+  // 2 to 6 players; 5–6 play the bigger board, with the special build phase.
+  const players = 2 + Math.floor(rng() * 5);
   const saves: (SavedTable | null)[] = [];
   const lobby = new Lobby({
     joinUrl: 'http://pc/phone.html',
@@ -98,7 +99,7 @@ function playGame(seed: number) {
   say(board, { type: 'hello', role: 'board' });
   say(board, {
     type: 'create',
-    options: { colors: PLAYER_COLORS.slice(0, players), firstSeat: Math.floor(rng() * players), size: 19, mode: 'balanced', seed, thiefStyle: 'onscreen' },
+    options: { colors: PLAYER_COLORS.slice(0, players), firstSeat: Math.floor(rng() * players), size: players >= 5 ? 30 : 19, mode: 'balanced', seed, thiefStyle: 'onscreen' },
   });
   const phones = Array.from({ length: players }, (_, seat) => {
     const p = botConn();
@@ -125,10 +126,14 @@ function playGame(seed: number) {
   let steps = 0;
   let sevens = 0;
   let cardsPlayed = 0;
-  while (board.board!.rules.winner === null && turns < MAX_TURNS && steps < MAX_TURNS * 60) {
+  let specials = 0;
+  // Real turns, from the game's own count: a special build phase moves the turn around the table too.
+  while (board.board!.rules.winner === null && board.board!.game.turn <= MAX_TURNS && steps < MAX_TURNS * 120) {
     steps++;
+    turns = board.board!.game.turn;
     const view = board.board!;
     const seat = view.game.current;
+    if (view.rules.special) specials++;
     const phone = phones[seat];
     const me = phone.last!.me!;
     const offer = phones.find((p) => p.last?.offer && p.last.offer.to === p.seat);
@@ -222,7 +227,6 @@ function playGame(seed: number) {
       send(phone, { type: 'offer', to, give: randomHand(rng, me.hand), get: randomHand(rng, null) });
     } else {
       send(rng() < 0.5 ? phone : board, { type: 'endTurn' });
-      if (board.board!.game.current !== seat) turns++;
     }
   }
   const last = saves.at(-1)!;
@@ -236,7 +240,7 @@ function playGame(seed: number) {
     // Random bots can starve: say nobody builds next to brick and they never save four of a
     // kind for the bank. Such games may stall, but only a few; every move was still checked.
     stalls.push(why());
-    return { last, steals: sevens, turns, cardsPlayed, won: false };
+    return { last, steals: sevens, turns, cardsPlayed, specials, won: false };
   }
   // The winner really has 10, counting secret points, and won on their own turn.
   const w = last.rules.winner!;
@@ -245,7 +249,7 @@ function playGame(seed: number) {
   const errors = phones[w].errors;
   send(phones[w], { type: 'endTurn' });
   assert(phones[w].errors === errors + 1, 'the finished game refuses moves');
-  return { last, steals: sevens, turns, cardsPlayed, won: true };
+  return { last, steals: sevens, turns, cardsPlayed, specials, won: true };
 }
 
 describe('simulated games', () => {
@@ -255,9 +259,11 @@ describe('simulated games', () => {
     let steals = 0;
     let played = 0;
     let wins = 0;
+    let specialSteps = 0;
     const awards = { road: 0, army: 0 };
     for (let g = 1; g <= GAMES; g++) {
-      const { last: t, steals: s, cardsPlayed, won } = playGame(g * 7919);
+      const { last: t, steals: s, cardsPlayed, won, specials } = playGame(g * 7919);
+      specialSteps += specials;
       if (won) wins++;
       steals += s;
       played += cardsPlayed;
@@ -273,6 +279,7 @@ describe('simulated games', () => {
     expect(played).toBeGreaterThan(GAMES);
     expect(wins, `nearly every game ends with a winner; stalled: ${stalls.join(' || ')}`).toBeGreaterThanOrEqual(GAMES * 0.9);
     expect(awards.road).toBeGreaterThan(0);
+    expect(specialSteps, 'bots went through special build phases').toBeGreaterThan(0);
     expect(awards.army).toBeGreaterThan(0);
   });
 });

@@ -322,6 +322,10 @@ function topBar(v: PhoneView) {
     status = me.placing ? `Tap a glowing spot on the board for your ${me.placing}, then ✓` : me.setupNeed ? `Setup: place a ${me.setupNeed}` : `${colorName(v, v.current)} is placing`;
   } else if (me.placing) {
     status = `Tap a glowing spot on the board for your ${me.placing}, then ✓`;
+  } else if (v.special) {
+    status = mine
+      ? `Special build after ${colorName(v, v.special.turnOf)}'s turn: build or buy a card, then Done`
+      : `${colorName(v, v.current)} is building after ${colorName(v, v.special.turnOf)}'s turn`;
   } else if (mine) {
     status = me.can.roll ? 'Your turn: roll the dice' : 'Your turn';
   } else {
@@ -396,7 +400,7 @@ function actions(v: PhoneView) {
     trade.disabled = !c.trade;
     items.push(buy, el('div', { class: 'pair' }, trade, cardsButton()));
     if (c.undo) items.push(button('Undo last', 'secondary', () => act({ type: 'undo' })));
-    const end = button('End turn', 'primary', () => act({ type: 'endTurn' }));
+    const end = button(v.special ? 'Done building' : 'End turn', 'primary', () => act({ type: 'endTurn' }));
     end.disabled = !c.endTurn;
     items.push(end);
   }

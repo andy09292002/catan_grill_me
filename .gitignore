@@ -3,3 +3,4 @@ dist/
 screenshots/
 *.log
 .table/
+build/

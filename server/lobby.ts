@@ -14,7 +14,7 @@ export interface Conn {
 
 /** What the server keeps on disk, so a restarted PC carries on with the same game and phones. */
 export interface SavedTable {
-  version: 3;
+  version: 4;
   id: string;
   started: boolean;
   game: GameState;
@@ -40,7 +40,7 @@ export function isSavedTable(t: unknown): t is SavedTable {
   if (typeof t !== 'object' || t === null) return false;
   const s = t as SavedTable;
   return (
-    s.version === 3 &&
+    s.version === 4 &&
     typeof s.id === 'string' &&
     typeof s.started === 'boolean' &&
     isGameState(s.game) &&
@@ -159,7 +159,7 @@ export class Lobby {
       const old = this.table;
       // A rematch with the same seats keeps every phone where it is and skips the joining screen.
       const same = !!msg.rematch && !!old && old.game.colors.join() === game.colors.join() && old.keys.every((k) => k !== null);
-      this.table = { version: 3, id: same ? old!.id : this.newId(), started: same, game, rules, keys: same ? old!.keys : game.colors.map(() => null) };
+      this.table = { version: 4, id: same ? old!.id : this.newId(), started: same, game, rules, keys: same ? old!.keys : game.colors.map(() => null) };
       this.rejoin.clear();
       if (!same) for (const c of this.conns) if (c.role === 'phone') c.seat = null;
       this.changed({ kind: 'new' });
@@ -265,6 +265,7 @@ export class Lobby {
       me: seat === null ? null : phoneMe(table, seat),
       offer,
       robber: publicRobber(table),
+      special: t.rules.special && { turnOf: t.rules.special.turnOf },
       myOrder: seat !== null && t.rules.robber?.victim === seat ? t.rules.robber.order : null,
       stolen: seat !== null && t.rules.lastSteal && (t.rules.lastSteal.from === seat || t.rules.lastSteal.to === seat) ? t.rules.lastSteal : null,
       knights: t.rules.knights,

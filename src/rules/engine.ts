@@ -31,8 +31,22 @@ export const COSTS: Record<BuildKind, Hand> = {
 export const PIECES: Record<BuildKind, number> = { road: 15, settlement: 5, city: 4 };
 export const BANK_EACH = 19;
 
+/** From this many players on, the bigger bank, the bigger deck and the special build phase. */
+export const BIG_TABLE = 5;
+
+/** Cards of each resource in the bank at the start: 19, or 24 for 5–6 players. */
+export function bankEach(players: number): number {
+  return players >= BIG_TABLE ? 24 : BANK_EACH;
+}
+
 export type DevCard = 'knight' | 'roads' | 'plenty' | 'monopoly' | 'point';
 export const DEV_CARDS: Record<DevCard, number> = { knight: 14, roads: 2, plenty: 2, monopoly: 2, point: 5 };
+/** The 5–6 player deck has more of everything but victory points. */
+export const DEV_CARDS_BIG: Record<DevCard, number> = { knight: 20, roads: 3, plenty: 3, monopoly: 3, point: 5 };
+
+export function devDeck(players: number): Record<DevCard, number> {
+  return players >= BIG_TABLE ? DEV_CARDS_BIG : DEV_CARDS;
+}
 export const DEV_NAMES: Record<DevCard, string> = {
   knight: 'Knight',
   roads: 'Road building',
@@ -112,7 +126,7 @@ export interface LogEntry {
 }
 
 export interface RulesState {
-  version: 3;
+  version: 4;
   phase: 'setup' | 'main';
   /** Seats in setup order: once round from the first player, then back the other way. */
   setupOrder: number[];
@@ -139,6 +153,11 @@ export interface RulesState {
   playedDev: boolean;
   /** Roads still to place free from a road building card. */
   freeRoads: number;
+  /**
+   * With 5–6 players, after each turn the others build in order (no trading, no cards played):
+   * whose turn it was, and who still gets to build after the current builder.
+   */
+  special: { turnOf: number; queue: number[] } | null;
   longestRoad: number | null;
   largestArmy: number | null;
   winner: number | null;
@@ -206,13 +225,13 @@ export function createRules(game: GameState, random: Rng = cryptoRng): RulesStat
   const n = game.colors.length;
   const round = Array.from({ length: n }, (_, i) => (game.firstSeat + i) % n);
   return {
-    version: 3,
+    version: 4,
     phase: 'setup',
     setupOrder: [...round, ...round.slice().reverse()],
     setupStep: 0,
     setupSettlement: null,
     hands: game.colors.map(() => hand()),
-    bank: hand({ wood: BANK_EACH, brick: BANK_EACH, wool: BANK_EACH, grain: BANK_EACH, ore: BANK_EACH }),
+    bank: hand(Object.fromEntries(RESOURCES.map((res) => [res, bankEach(game.colors.length)]))),
     buildings: g.spots.map(() => null),
     roads: g.paths.map(() => null),
     rolled: false,
@@ -222,13 +241,14 @@ export function createRules(game: GameState, random: Rng = cryptoRng): RulesStat
     robber: null,
     lastSteal: null,
     deck: shuffle(
-      (Object.keys(DEV_CARDS) as DevCard[]).flatMap((c) => Array<DevCard>(DEV_CARDS[c]).fill(c)),
+      (Object.entries(devDeck(game.colors.length)) as [DevCard, number][]).flatMap(([c, n]) => Array<DevCard>(n).fill(c)),
       random,
     ),
     devCards: game.colors.map(() => []),
     knights: game.colors.map(() => 0),
     playedDev: false,
     freeRoads: 0,
+    special: null,
     longestRoad: null,
     largestArmy: null,
     winner: null,
@@ -350,15 +370,20 @@ function settle(t: Table): Table {
       rules = log({ ...rules, longestRoad: holder }, holder, text);
     }
     const seat = t.game.current;
-    if (totalPoints(rules, seat) >= WIN_POINTS) {
+    // A win only counts on the player's own turn, not while building in someone else's.
+    if (!rules.special && totalPoints(rules, seat) >= WIN_POINTS) {
       rules = log({ ...rules, winner: seat, pending: null, offer: null, robber: null }, seat, `${PLAYER_NAMES[t.game.colors[seat]]} wins!`);
     }
   }
   return rules === t.rules ? t : { ...t, rules };
 }
 
+/** In the special build phase only building, buying cards and finishing are open. */
+const SPECIAL_ACTIONS = new Set<Action['type']>(['build', 'pick', 'confirm', 'cancel', 'undo', 'buyCard', 'endTurn']);
+
 function act(t: Table, seat: number, action: Action, roll: () => Dice, random: Rng): Result {
   const r = t.rules;
+  if (r.special && !SPECIAL_ACTIONS.has(action.type)) return fail('Only building and buying cards now');
   if (r.robber && !ROBBER_ACTIONS.has(action.type)) return fail(robberWait(t));
   const current = t.game.current;
   const name = PLAYER_NAMES[t.game.colors[seat]] ?? '';
@@ -475,10 +500,7 @@ function act(t: Table, seat: number, action: Action, roll: () => Dice, random: R
       if (r.phase !== 'main') return fail('Finish setup first');
       if (!r.rolled) return fail('Roll first');
       if (r.pending) return fail('Finish building first');
-      return done(
-        { game: nextTurn(t.game), rules: { ...r, rolled: false, offer: null, lastBuild: null, lastSteal: null, playedDev: false, freeRoads: 0 } },
-        'turn',
-      );
+      return passTurn(t);
     }
 
     case 'moveThief': {
@@ -542,6 +564,30 @@ function act(t: Table, seat: number, action: Action, roll: () => Dice, random: R
       return playCard(t, seat, action);
   }
   return fail('Unknown action');
+}
+
+/**
+ * Ends a turn, or a special build. With 5–6 players a turn is followed by each other player,
+ * in order, building if they like; the next turn starts once the last of them is done.
+ */
+function passTurn(t: Table): Result {
+  const r = t.rules;
+  const n = t.game.colors.length;
+  const tidy = { offer: null, lastBuild: null, lastSteal: null, freeRoads: 0, pending: null };
+  const name = (s: number) => PLAYER_NAMES[t.game.colors[s]];
+  let special = r.special;
+  if (!special && n >= BIG_TABLE) {
+    const turnOf = t.game.current;
+    special = { turnOf, queue: Array.from({ length: n - 1 }, (_, i) => (turnOf + 1 + i) % n) };
+  }
+  if (special && special.queue.length) {
+    const [builder, ...queue] = special.queue;
+    const rules = log({ ...r, ...tidy, special: { ...special, queue } }, builder, `Special build: ${name(builder)} may build`);
+    return done({ game: { ...t.game, current: builder }, rules }, 'turn');
+  }
+  const turnOf = special ? special.turnOf : t.game.current;
+  const game = nextTurn({ ...t.game, current: turnOf });
+  return done({ game, rules: { ...r, ...tidy, special: null, rolled: false, playedDev: false } }, 'turn');
 }
 
 function playCard(t: Table, seat: number, action: Extract<Action, { type: 'playCard' }>): Result {
@@ -788,7 +834,7 @@ export function isRulesState(r: unknown, game: GameState): r is RulesState {
   const n = game.colors.length;
   const seatOk = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) < n;
   return (
-    s.version === 3 &&
+    s.version === 4 &&
     (s.phase === 'setup' || s.phase === 'main') &&
     Array.isArray(s.setupOrder) &&
     s.setupOrder.length === 2 * n &&
@@ -802,7 +848,7 @@ export function isRulesState(r: unknown, game: GameState): r is RulesState {
     s.hands.every(isHand) &&
     isHand(s.bank) &&
     // No card is ever made or lost.
-    RESOURCES.every((res) => s.bank[res] + s.hands.reduce((m, h) => m + h[res], 0) === BANK_EACH) &&
+    RESOURCES.every((res) => s.bank[res] + s.hands.reduce((m, h) => m + h[res], 0) === bankEach(n)) &&
     Array.isArray(s.buildings) &&
     s.buildings.length === g.spots.length &&
     s.buildings.every((b) => b === null || (seatOk(b.seat) && (b.kind === 'settlement' || b.kind === 'city'))) &&
@@ -822,11 +868,12 @@ export function isRulesState(r: unknown, game: GameState): r is RulesState {
     Array.isArray(s.devCards) &&
     s.devCards.length === n &&
     // Every development card is in the deck or a hand, or was played (and so can't come back).
-    s.deck.length + s.devCards.reduce((m, h) => m + h.length, 0) <= 25 &&
+    s.deck.length + s.devCards.reduce((m, h) => m + h.length, 0) <= Object.values(devDeck(n)).reduce((a, b) => a + b, 0) &&
     Array.isArray(s.knights) &&
     s.knights.length === n &&
     typeof s.playedDev === 'boolean' &&
     Number.isInteger(s.freeRoads) &&
+    (s.special === null || (typeof s.special === 'object' && seatOk(s.special.turnOf) && Array.isArray(s.special.queue) && s.special.queue.every(seatOk))) &&
     (s.longestRoad === null || seatOk(s.longestRoad)) &&
     (s.largestArmy === null || seatOk(s.largestArmy)) &&
     (s.winner === null || seatOk(s.winner)) &&
