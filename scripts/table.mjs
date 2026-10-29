@@ -123,13 +123,48 @@ try {
   await board.waitForTimeout(700);
   await board.screenshot({ path: `${out}/09-board-next-turn.png` });
 
+  // A 7, keyed in from physical dice: the thief moves on the board and takes a card face down.
+  const roller = phones[second].page;
+  await roller.getByRole('button', { name: 'Enter dice' }).click();
+  await roller.getByRole('button', { name: '7', exact: true }).click();
+  await board.waitForFunction(() => window.hexBoard.remote.rules.robber?.stage === 'move');
+  const target = (second + 1) % 3;
+  const thiefNow = (await remote()).game.thiefTile;
+  const tile = (await board.evaluate((s) => window.hexBoard.tilesTouching(s), target)).find((id) => id !== thiefNow);
+  const tp = await board.evaluate((id) => window.hexBoard.tileOnScreen(id), tile);
+  await board.mouse.click(tp.x, tp.y);
+  await board.locator('#build-confirm:not([hidden])').waitFor();
+  await board.waitForTimeout(400);
+  await board.screenshot({ path: `${out}/10-board-thief.png` });
+  await board.locator('#build-yes').click();
+  await board.waitForFunction((id) => window.hexBoard.game.thiefTile === id, tile);
+  check(true, 'a 7 lets the roller move the thief on the board');
+  const stage = (await remote()).rules.robber?.stage;
+  if (stage === 'choose') await roller.getByRole('button', { name: new RegExp(`^Rob ${phones[target].color}`) }).click();
+  if (stage) {
+    await roller.locator('.card-back').first().waitFor();
+    await roller.screenshot({ path: `${out}/11-phone-steal.png` });
+    const victim = (await remote()).rules.robber.victim;
+    await phones[victim].page.getByText(/is taking one of your cards/).waitFor();
+    await phones[victim].page.screenshot({ path: `${out}/12-phone-victim.png` });
+    const before = (await remote()).rules.cards;
+    await roller.locator('.card-back').first().click();
+    await board.waitForFunction(() => !window.hexBoard.remote.rules.robber);
+    const after7 = (await remote()).rules.cards;
+    check(after7[second] === before[second] + 1 && after7.reduce((a, b) => a + b) === before.reduce((a, b) => a + b), 'the face-down pick moves one card');
+    await roller.getByText(/^You took /).waitFor();
+  }
+  await roller.getByRole('button', { name: 'End turn' }).click();
+  const third = (second + 1) % 3;
+  await phones[third].page.getByText('Your turn').first().waitFor();
+
   // A phone that sleeps and comes back keeps its seat.
   await phones[2].page.close();
   await board.locator('.seat-badge.away').waitFor();
   check(true, 'board marks a dropped phone');
   phones[2].page = await phones[2].ctx.newPage();
   await phones[2].page.goto(`${BASE}/phone.html`);
-  await phones[2].page.getByText(turnText(second, 2)).first().waitFor();
+  await phones[2].page.getByText(turnText(third, 2)).first().waitFor();
   await board.locator('.seat-badge.away').waitFor({ state: 'detached' });
   check(true, 'reopened phone is back in its seat');
 
@@ -151,11 +186,11 @@ try {
   server = await startServer();
   // Red's phone never moved, so it's the one to watch reconnect.
   await phones[0].page.getByText('Reconnecting…').waitFor({ state: 'detached', timeout: 8000 });
-  await phones[0].page.getByText(turnText(second, 0)).first().waitFor();
+  await phones[0].page.getByText(turnText(third, 0)).first().waitFor();
   await board.reload();
   await board.locator('.seat-badge').first().waitFor();
   const after = await remote();
-  check(after.game.current === second && after.rules.points.every((n) => n === 2), 'game survives a server restart');
+  check(after.game.current === third && after.rules.points.every((n) => n === 2), 'game survives a server restart');
 
   const portrait = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const upright = await portrait.newPage();

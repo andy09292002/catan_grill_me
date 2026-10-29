@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NewGameOptions } from '../src/game/state';
 import type { ClientMessage, ServerMessage } from '../src/net/protocol';
+import { geometryOf } from '../src/rules/engine';
 import { isSavedTable, Lobby, type Conn, type SavedTable } from './lobby';
 
 const OPTIONS: NewGameOptions = { colors: ['red', 'blue', 'white'], firstSeat: 0, size: 19, mode: 'balanced', seed: 42, thiefStyle: 'onscreen' };
@@ -8,7 +9,7 @@ const OPTIONS: NewGameOptions = { colors: ['red', 'blue', 'white'], firstSeat: 0
 function setup(saved: SavedTable | null = null) {
   let n = 0;
   const saves: (SavedTable | null)[] = [];
-  const lobby = new Lobby({ joinUrl: 'http://pc:5180/phone.html', save: (t) => saves.push(t && structuredClone(t)), newId: () => `id${++n}`, roll: () => [3, 4] }, saved);
+  const lobby = new Lobby({ joinUrl: 'http://pc:5180/phone.html', save: (t) => saves.push(t && structuredClone(t)), newId: () => `id${++n}`, roll: () => [2, 4] }, saved);
   const conn = () => {
     const inbox: ServerMessage[] = [];
     const c: Conn & { inbox: ServerMessage[]; last: <T extends ServerMessage['type']>(t: T) => Extract<ServerMessage, { type: T }> | undefined } = {
@@ -190,7 +191,7 @@ describe('playing', () => {
     const t = fullTable();
     playSetup(t);
     t.say(t.board, { type: 'act', action: { type: 'roll' } });
-    expect(t.board.last('board')).toMatchObject({ event: { kind: 'roll', roll: { total: 7, dice: [3, 4] } } });
+    expect(t.board.last('board')).toMatchObject({ event: { kind: 'roll', roll: { total: 6, dice: [2, 4] } } });
     t.say(t.phones[0], { type: 'act', action: { type: 'endTurn' } });
     expect(t.phones[1].last('phone')!.view.current).toBe(1);
     t.say(t.phones[1], { type: 'act', action: { type: 'enterRoll', total: 11 } });
@@ -222,14 +223,51 @@ describe('playing', () => {
     expect(board.last('board')!.view.rules.pending).toBeNull();
   });
 
-  it('moves the thief to another tile only', () => {
+  it('moves the thief after a 7, tapped and confirmed on the board', () => {
     const t = fullTable();
     playSetup(t);
     const from = t.board.last('board')!.view.game.thiefTile!;
-    t.say(t.board, { type: 'act', action: { type: 'moveThief', tile: from } });
-    expect(t.board.last('error')).toBeTruthy();
     t.say(t.board, { type: 'act', action: { type: 'moveThief', tile: (from + 1) % 19 } });
+    expect(t.board.last('error')!.message).toMatch(/after a 7/);
+    t.say(t.phones[0], { type: 'act', action: { type: 'enterRoll', total: 7 } });
+    expect(t.board.last('board')!.view.rules.robber!.stage).toBe('move');
+    // Phones can't move the thief; the board can.
+    t.say(t.phones[0], { type: 'act', action: { type: 'moveThief', tile: (from + 1) % 19 } });
+    expect(t.board.last('board')!.view.rules.robber!.tile).toBeNull();
+    t.say(t.board, { type: 'act', action: { type: 'moveThief', tile: (from + 1) % 19 } });
+    expect(t.board.last('board')!.view.rules.robber!.tile).toBe((from + 1) % 19);
+    t.say(t.board, { type: 'act', action: { type: 'confirm' } });
     expect(t.board.last('board')).toMatchObject({ event: { kind: 'thief' }, view: { game: { thiefTile: (from + 1) % 19 } } });
+  });
+
+  it('shows the face-down order to the victim only', () => {
+    const t = fullTable();
+    playSetup(t);
+    t.say(t.phones[0], { type: 'act', action: { type: 'enterRoll', total: 7 } });
+    const view = () => t.board.last('board')!.view;
+    // Find a tile next to one of seat 1's settlements and none of seat 0's.
+    const g = geometryOf(view().game);
+    const tile = view().game.board.tiles.findIndex((_, id) => {
+      const owners = g.spots.filter((s) => s.tiles.includes(id)).map((s) => view().rules.buildings[s.id]?.seat);
+      return id !== view().game.thiefTile && owners.includes(1) && !owners.includes(0) && !owners.includes(2);
+    });
+    expect(tile).toBeGreaterThanOrEqual(0);
+    expect(view().rules.cards[1]).toBeGreaterThan(0);
+    t.say(t.board, { type: 'act', action: { type: 'moveThief', tile } });
+    t.say(t.board, { type: 'act', action: { type: 'confirm' } });
+    expect(view().rules.robber).toMatchObject({ stage: 'steal', victim: 1, count: view().rules.cards[1] });
+    expect(JSON.stringify(t.board.last('board'))).not.toContain('"order"');
+    expect(t.phones[0].last('phone')!.view.myOrder).toBeNull();
+    expect(t.phones[2].last('phone')!.view.myOrder).toBeNull();
+    const order = t.phones[1].last('phone')!.view.myOrder!;
+    expect(order).toHaveLength(view().rules.cards[1]);
+
+    t.say(t.phones[0], { type: 'act', action: { type: 'steal', index: 0 } });
+    expect(t.phones[0].last('phone')!.view.stolen).toEqual({ from: 1, to: 0, card: order[0] });
+    expect(t.phones[1].last('phone')!.view.stolen).toEqual({ from: 1, to: 0, card: order[0] });
+    expect(t.phones[2].last('phone')!.view.stolen).toBeNull();
+    // The board, in everyone's view, never says which card it was.
+    expect(JSON.stringify(t.board.last('board'))).not.toMatch(/"card"|"stolen"|"lastSteal"/);
   });
 
   it('never sends anyone another player’s cards', () => {
@@ -260,7 +298,7 @@ describe('saving', () => {
     const next = setup(saved);
     const b = next.conn();
     next.say(b, { type: 'hello', role: 'board' });
-    expect(b.last('board')!.view.game.lastRoll!.total).toBe(7);
+    expect(b.last('board')!.view.game.lastRoll!.total).toBe(6);
     const p = next.conn();
     next.say(p, { type: 'hello', role: 'phone', key: saved.keys[2]! });
     expect(p.seat).toBe(2);

@@ -456,3 +456,54 @@ button:disabled {
   color: #fff;
   font-weight: 800;
 }
+
+/* The 7: discarding, and picking a face-down card. */
+
+.discard .stepper {
+  padding: 4px 6px;
+}
+.count {
+  margin-right: auto;
+  font-weight: 800;
+  color: var(--ink-muted);
+}
+.backs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.backs .card {
+  position: static;
+  transform: none;
+  width: 64px;
+}
+.card-back {
+  width: 64px;
+  aspect-ratio: 5 / 7;
+  border-radius: 10px;
+  border: 3px solid #fdf6e3;
+  background: repeating-linear-gradient(45deg, #1b5f93 0 8px, #154c77 8px 16px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.card-back:active {
+  transform: translateY(-6px);
+}
+.victim {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.victim .dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--victim);
+}
+.victim small {
+  margin-left: auto;
+  color: var(--ink-muted);
+}
+.toast.good {
+  background: #2f8f46;
+}

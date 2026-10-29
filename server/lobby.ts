@@ -2,7 +2,7 @@ import { rollDice } from '../src/game/dice';
 import { isGameState } from '../src/game/storage';
 import { createGame, type GameState, type NewGameOptions } from '../src/game/state';
 import type { BoardView, ClientMessage, PhoneView, SeatView, ServerMessage, TableEvent } from '../src/net/protocol';
-import { allowedFrom, phoneMe, publicRules } from '../src/net/views';
+import { allowedFrom, phoneMe, publicRobber, publicRules } from '../src/net/views';
 import { apply, handSize, isRulesState, publicPoints, startTable, type Action, type RulesState } from '../src/rules/engine';
 
 /** One open connection: the board page or a phone. */
@@ -29,6 +29,8 @@ export interface LobbyOptions {
   save(table: SavedTable | null): void;
   newId?: () => string;
   roll?: () => [number, number];
+  /** For shuffling face-down cards; tests pass a seeded one. */
+  random?: () => number;
 }
 
 const isInt = (v: unknown, min: number, max: number): v is number =>
@@ -192,7 +194,7 @@ export class Lobby {
   private act(conn: Conn, seat: number, action: Action, device: 'board' | 'phone') {
     const t = this.table!;
     if (!allowedFrom(device, action)) return;
-    const result = apply({ game: t.game, rules: t.rules }, seat, action, this.roll);
+    const result = apply({ game: t.game, rules: t.rules }, seat, action, this.roll, this.opts.random);
     if (!result.ok) {
       conn.send({ type: 'error', message: result.reason });
       return;
@@ -259,6 +261,9 @@ export class Lobby {
       players: t.rules.hands.map((h, s) => ({ cards: handSize(h), points: publicPoints(t.rules, s) })),
       me: seat === null ? null : phoneMe(table, seat),
       offer,
+      robber: publicRobber(table),
+      myOrder: seat !== null && t.rules.robber?.victim === seat ? t.rules.robber.order : null,
+      stolen: seat !== null && t.rules.lastSteal && (t.rules.lastSteal.from === seat || t.rules.lastSteal.to === seat) ? t.rules.lastSteal : null,
       log: t.rules.log.slice(0, 8),
     };
   }

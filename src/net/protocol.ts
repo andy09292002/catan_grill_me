@@ -4,7 +4,7 @@
 
 import type { PlayerColor } from '../game/players';
 import type { GameState, NewGameOptions, Roll } from '../game/state';
-import type { Action, BuildKind, Building, Hand, LogEntry, Resource, RulesState, TradeOffer } from '../rules/engine';
+import type { Action, BuildKind, Building, Hand, LogEntry, Resource, Robber, RulesState, Steal, TradeOffer } from '../rules/engine';
 
 export const TABLE_PORT = 5180;
 export const SOCKET_PATH = '/ws';
@@ -37,6 +37,18 @@ export interface PublicRules {
   rolled: boolean;
   /** A build waiting on the board: where it may go and the spot tapped so far. */
   pending: { seat: number; kind: BuildKind; legal: number[]; at: number | null } | null;
+  robber: PublicRobber | null;
+}
+
+/** The thief's progress after a 7, without the order of the face-down cards. */
+export interface PublicRobber {
+  stage: Robber['stage'];
+  owed: number[];
+  tile: number | null;
+  victims: number[];
+  victim: number | null;
+  /** How many face-down cards the roller is picking from. */
+  count: number;
 }
 
 export interface BoardView {
@@ -86,6 +98,11 @@ export interface PhoneView {
   me: PhoneMe | null;
   /** A trade offer this phone made or was sent. */
   offer: TradeOffer | null;
+  robber: PublicRobber | null;
+  /** Only for the victim: their own cards in the face-down order, so they see which one goes. */
+  myOrder: Resource[] | null;
+  /** The last card taken, if this phone took it or lost it. */
+  stolen: Steal | null;
   log: LogEntry[];
 }
 

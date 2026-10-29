@@ -26,10 +26,10 @@ export interface Placement {
   angle: number;
 }
 
-/** A banner that stays up until closed, with one button, for "move the thief". */
+/** A banner that stays up until closed, with up to one button, for "move the thief". */
 export interface Prompt {
   caption: string;
-  action: { label: string; onClick: () => void };
+  action?: { label: string; onClick: () => void };
 }
 
 export interface BannerHandle {
@@ -65,8 +65,8 @@ export function showBanner(where: Placement, roll: Roll | null, prompt?: Prompt)
     { class: 'banner-caption' },
     prompt?.caption ?? (seven ? 'Move the thief' : roll?.dice ? 'Rolled' : 'Entered'),
   );
-  const button = prompt ? el('button', { type: 'button', class: 'btn secondary banner-action' }, prompt.action.label) : null;
-  button?.addEventListener('click', prompt!.action.onClick);
+  const button = prompt?.action ? el('button', { type: 'button', class: 'btn secondary banner-action' }, prompt.action.label) : null;
+  if (prompt?.action) button!.addEventListener('click', prompt.action.onClick);
   banner.append(dice, total, caption);
   if (button) banner.append(button);
   document.body.append(banner);

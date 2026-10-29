@@ -24,7 +24,7 @@ import { showBanner, TUMBLE_MS, type BannerHandle } from './ui/banner';
 import { confirmDialog } from './ui/confirm';
 import { openPad } from './ui/pad';
 import { showLobby, showRejoin, type LobbyHandle } from './ui/lobby';
-import { renderSeatBadges } from './ui/seats';
+import { placeAtEdge, renderSeatBadges } from './ui/seats';
 import { FIRST_LAUNCH_DEFAULTS, openSetup, type PlayMode } from './ui/setup';
 import type { BoardView, ServerMessage } from './net/protocol';
 import { openSocket, tableAvailable, type TableSocket } from './net/socket';
@@ -71,6 +71,8 @@ let rolling = false;
 let frame = 0;
 /** Set while players choose where the on-screen thief goes; the board only takes taps then. */
 let choosingThief: BannerHandle | null = null;
+/** With phones: which step of a 7 the note at the roller's edge shows. */
+let robberKey = '';
 
 let prefs = loadPrefs();
 /** Lowered for this session if the device can't keep up with Full; the saved preference stays. */
@@ -129,7 +131,8 @@ function render(now: number) {
   const flashing = now - flashStart < FLASH_MS;
 
   const level = animationLevel();
-  const busy = t < 1 || flashing || !!choosingThief || !!remote?.rules.pending;
+  const robber = remote?.started ? remote.rules.robber : null;
+  const busy = t < 1 || flashing || !!choosingThief || !!remote?.rules.pending || !!robber;
   // Calm skips frames unless something else on the board is moving.
   if (level === 'calm' && !busy && now - lastDraw < CALM_FRAME_MS) {
     requestRender();
@@ -170,7 +173,11 @@ function render(now: number) {
     thief:
       game.thiefTile === null
         ? null
-        : { tile: game.thiefTile, choosing: !!choosingThief, pulse: choosingThief ? (now % THIEF_PULSE_MS) / THIEF_PULSE_MS : 0 },
+        : (() => {
+            // With phones, the thief shows where it was tapped until ✓ moves it.
+            const choosing = !!choosingThief || robber?.stage === 'move';
+            return { tile: robber?.tile ?? game.thiefTile, choosing, pulse: choosing ? (now % THIEF_PULSE_MS) / THIEF_PULSE_MS : 0 };
+          })(),
     animation: { t: now / 1000, level },
     pieces: piecesView(now),
   });
@@ -199,16 +206,18 @@ function piecesView(now: number): PiecesView | null {
   };
 }
 
-/** ✓ and ✗ beside a piece waiting to be placed, turned to face its player. */
+/** ✓ and ✗ beside a piece (or the thief) waiting to be placed, turned to face its player. */
 function updateBuildConfirm() {
   const box = document.querySelector<HTMLElement>('#build-confirm')!;
   const p = remote?.started ? remote.rules.pending : null;
-  if (!p || p.at === null || !board) {
+  const thiefTile = remote?.started && remote.rules.robber?.stage === 'move' ? remote.rules.robber.tile : null;
+  if ((!p || p.at === null) && thiefTile === null) {
     box.hidden = true;
     return;
   }
+  if (!board) return;
   const fit = fitBoard(board.layout, window.innerWidth, window.innerHeight);
-  const at = placeAt(fit, geometryOf(remote!.game), p.kind, p.at);
+  const at = p && p.at !== null ? placeAt(fit, geometryOf(remote!.game), p.kind, p.at) : fit.toScreen(board.layout.centers[thiefTile!]);
   // Just past the piece on its player's side, so a hand reaching in doesn't cover the piece.
   const d = seatDirection(angleTo);
   const reach = fit.scale * 0.62;
@@ -237,7 +246,8 @@ function updateControls() {
   dot.style.background = PLAYER_HEX[color];
   document.querySelector('#next-turn')!.setAttribute('aria-label', `Next turn. Now playing: ${PLAYER_NAMES[color]}`);
   document.querySelector<HTMLElement>('#next-turn')!.style.setProperty('--player', PLAYER_HEX[color]);
-  document.querySelector<HTMLElement>('#move-thief')!.hidden = game.thiefStyle !== 'onscreen';
+  // With phones the thief only moves after a 7, so the free Thief button goes.
+  document.querySelector<HTMLElement>('#move-thief')!.hidden = game.thiefStyle !== 'onscreen' || !!remote;
 
   // While the dice tumble, the corner still shows the previous roll so it doesn't give the result away.
   const skip = rolling ? 1 : 0;
@@ -283,6 +293,11 @@ function onBoardTap(e: PointerEvent) {
   if (!game || !board || rolling) return;
   const fit = fitBoard(board.layout, window.innerWidth, window.innerHeight);
   const pending = remote?.started ? remote.rules.pending : null;
+  if (remote?.started && remote.rules.robber?.stage === 'move') {
+    const tile = pickTile(board.layout, fit, { x: e.clientX, y: e.clientY });
+    if (tile !== null && tile !== game.thiefTile) table!.send({ type: 'act', action: { type: 'moveThief', tile } });
+    return;
+  }
   if (pending) {
     const at = pickPlace(fit, geometryOf(remote!.game), pending.kind, pending.legal, { x: e.clientX, y: e.clientY });
     if (at !== null) table!.send({ type: 'act', action: { type: 'pick', at } });
@@ -310,7 +325,12 @@ function applyRoll(roll: Roll) {
 /** The banner, dice and flashing tiles for a roll that's already in the game. */
 function showRoll(roll: Roll) {
   if (!game) return;
-  if (roll.total === THIEF_NUMBER && game.thiefStyle === 'onscreen') startChoosingThief(roll);
+  if (remote && roll.total === THIEF_NUMBER) {
+    // The dice show as usual; the note at the roller's edge then follows the 7 step by step.
+    showBanner(bannerPlacement(), roll);
+    robberKey = '';
+    syncRobber();
+  } else if (roll.total === THIEF_NUMBER && game.thiefStyle === 'onscreen') startChoosingThief(roll);
   else showBanner(bannerPlacement(), roll);
   if (roll.dice) {
     // Keep the result hidden on the board until the dice stop tumbling.
@@ -451,7 +471,34 @@ function onServer(msg: ServerMessage) {
     lobby.close();
     lobby = null;
   }
+  syncRobber();
   renderBadges();
+}
+
+/**
+ * Keeps the note at the roller's edge in step with a 7: who still has to discard, then the
+ * move and the steal. It sits at the edge so it never covers the tiles being chosen.
+ */
+function syncRobber() {
+  const note = document.querySelector<HTMLElement>('#robber-note')!;
+  const rb = remote?.started ? remote.rules.robber : null;
+  const key = rb ? `${rb.stage}:${rb.owed.join()}:${rb.victim}:${angleTo}` : '';
+  if (key === robberKey) return;
+  robberKey = key;
+  note.hidden = !rb;
+  if (!rb || !remote || !game) return;
+  const name = (seat: number) => PLAYER_NAMES[game!.colors[seat]];
+  const roller = name(remote.game.current);
+  const captions = {
+    discard: `Discard on your phones: ${rb.owed.flatMap((n, s) => (n > 0 ? [`${name(s)} ${n}`] : [])).join(' · ')}`,
+    move: `${roller}: tap a tile to move the thief, then ✓`,
+    choose: `${roller} is choosing whom to rob`,
+    steal: `${roller} is taking a card from ${rb.victim === null ? '' : name(rb.victim)}`,
+  };
+  note.textContent = captions[rb.stage];
+  note.style.transform = `translate(-50%, -50%) rotate(${angleTo}deg)`;
+  // Just inside the roller's own panel.
+  placeAtEdge(note, angleTo, 56);
 }
 
 function renderBadges() {
@@ -508,6 +555,9 @@ declare global {
       readonly remote: BoardView | null;
       /** Where a spot (or a path, for a road) is on screen, for scripts that tap the board. */
       placeOnScreen(kind: BuildKind, at: number): { x: number; y: number } | null;
+      /** A tile's centre on screen, and the tiles next to a seat's buildings, for scripts that move the thief. */
+      tileOnScreen(tile: number): { x: number; y: number } | null;
+      tilesTouching(seat: number): number[];
       readonly stats: { level: AnimationLevel; slowDevice: boolean; averageDrawMs: number };
     };
   }
@@ -518,6 +568,15 @@ window.hexBoard = {
   },
   get remote() {
     return remote;
+  },
+  tileOnScreen(tile) {
+    if (!board) return null;
+    return fitBoard(board.layout, window.innerWidth, window.innerHeight).toScreen(board.layout.centers[tile]);
+  },
+  tilesTouching(seat) {
+    if (!remote) return [];
+    const g = geometryOf(remote.game);
+    return [...new Set(g.spots.filter((s) => remote!.rules.buildings[s.id]?.seat === seat).flatMap((s) => s.tiles))];
   },
   placeOnScreen(kind, at) {
     if (!remote || !board) return null;
@@ -531,6 +590,8 @@ window.hexBoard = {
 window.addEventListener('resize', () => {
   requestRender();
   renderBadges();
+  robberKey = '';
+  syncRobber();
 });
 
 const fromUrl = gameFromUrl();

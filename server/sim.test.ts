@@ -46,6 +46,14 @@ function assert(ok: boolean, what: string) {
   if (!ok) throw new Error(`Broken rule: ${what}`);
 }
 
+/** `n` random cards from `h`. */
+function someOf(rng: Rng, h: Hand, n: number): Hand {
+  const pool = RESOURCES.flatMap((r) => Array<(typeof RESOURCES)[number]>(h[r]).fill(r));
+  const out = hand();
+  for (let i = 0; i < n && pool.length; i++) out[pool.splice(Math.floor(rng() * pool.length), 1)[0]]++;
+  return out;
+}
+
 /** Everything the rules promise about a saved table. Plain checks: there are thousands of them. */
 function checkTable(t: SavedTable) {
   assert(isSavedTable(t), 'saved table is valid and no card was made or lost');
@@ -77,6 +85,7 @@ function playGame(seed: number) {
     joinUrl: 'http://pc/phone.html',
     save: (t) => saves.push(t && structuredClone(t)),
     roll: () => [1 + Math.floor(rng() * 6), 1 + Math.floor(rng() * 6)],
+    random: rng,
   });
   const board = botConn();
   lobby.connect(board);
@@ -109,6 +118,7 @@ function playGame(seed: number) {
 
   let turns = 0;
   let steps = 0;
+  let sevens = 0;
   while (turns < TURNS && steps < TURNS * 60) {
     steps++;
     const view = board.board!;
@@ -119,6 +129,24 @@ function playGame(seed: number) {
 
     if (offer && rng() < 0.9) {
       send(offer, { type: 'respond', accept: rng() < 0.6 });
+      continue;
+    }
+    const rb = view.rules.robber;
+    if (rb && rng() > 0.08) {
+      if (rb.stage === 'discard') {
+        const who = pick(rng, rb.owed.flatMap((n, s) => (n > 0 ? [s] : [])));
+        // Now and then a wrong count, which must be refused.
+        const n = rng() < 0.1 ? rb.owed[who] + 1 : rb.owed[who];
+        send(phones[who], { type: 'discard', cards: someOf(rng, phones[who].last!.me!.hand, n) });
+      } else if (rb.stage === 'move') {
+        if (rb.tile === null || rng() < 0.2) send(board, { type: 'moveThief', tile: Math.floor(rng() * view.game.board.tiles.length) });
+        else send(board, rng() < 0.85 ? { type: 'confirm' } : { type: 'cancel' });
+      } else if (rb.stage === 'choose') {
+        send(phone, { type: 'chooseVictim', seat: pick(rng, rb.victims) });
+      } else {
+        sevens++;
+        send(phone, { type: 'steal', index: Math.floor(rng() * rb.count) });
+      }
       continue;
     }
     if (view.rules.pending) {
@@ -172,20 +200,23 @@ function playGame(seed: number) {
   const last = saves.at(-1)!;
   expect(last.rules.phase, 'setup finished').toBe('main');
   expect(turns, 'the game kept moving').toBe(TURNS);
-  return last;
+  return { last, steals: sevens };
 }
 
 describe('simulated games', () => {
   it(`${GAMES} bot games of ${TURNS} turns keep to the rules`, { timeout: GAMES * 1000 }, () => {
     let built = 0;
     let traded = 0;
+    let steals = 0;
     for (let g = 1; g <= GAMES; g++) {
-      const t = playGame(g * 7919);
+      const { last: t, steals: s } = playGame(g * 7919);
+      steals += s;
       built += t.rules.buildings.filter(Boolean).length;
       traded += t.rules.log.filter((l) => l.text.includes('traded')).length;
     }
     // The bots really played: plenty built and traded, not just setup.
     expect(built).toBeGreaterThan(GAMES * 5);
     expect(traded).toBeGreaterThan(0);
+    expect(steals).toBeGreaterThan(GAMES);
   });
 });
