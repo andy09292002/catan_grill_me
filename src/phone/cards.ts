@@ -28,12 +28,12 @@ function cardArt(res: Resource, px: number): string {
   return url;
 }
 
-/** A full card, as held in the hand. */
-export function card(res: Resource, extra: Record<string, string> = {}): HTMLElement {
+/** A full card, as held in the hand. `style` is added to the card's own colors, not in place of them. */
+export function card(res: Resource, style = ''): HTMLElement {
   const [light, dark] = TERRAIN_COLORS[RESOURCE_TERRAIN[res]];
   return el(
     'div',
-    { class: 'card', style: `--card-light:${light};--card-dark:${dark}`, ...extra },
+    { class: 'card', style: `--card-light:${light};--card-dark:${dark};${style}` },
     el('img', { src: cardArt(res, 64), alt: '', draggable: 'false' }),
     el('span', { class: 'card-name' }, RESOURCE_NAMES[res]),
   );

@@ -50,6 +50,10 @@ let bankGive: Resource | null = null;
 let bankGet: Resource | null = null;
 let offerGive = hand();
 let offerGet = hand();
+/** Cards picked to discard after a 7. */
+let discardDraft = hand();
+/** The last steal this phone was told about, so it's announced once. */
+let stolenKey = '';
 
 const socket = openSocket(
   () => {
@@ -79,6 +83,8 @@ function onMessage(msg: ServerMessage) {
       // A sheet that no longer applies closes by itself.
       if (sheet === 'trade' && !view.me?.can.trade) sheet = null;
       if (sheet === 'pad' && !view.me?.can.roll) sheet = null;
+      if (!view.robber || view.robber.stage !== 'discard') discardDraft = hand();
+      announceSteal(view);
       break;
     case 'noTable':
       view = null;
@@ -97,6 +103,19 @@ function onMessage(msg: ServerMessage) {
 }
 
 const colorName = (v: PhoneView, seat: number) => PLAYER_NAMES[v.seats[seat].color];
+
+/** Tells the two players involved which card was taken. */
+function announceSteal(v: PhoneView) {
+  const s = v.stolen;
+  const key = s ? `${v.log.length}:${v.log[0]?.text}:${s.from}:${s.to}:${s.card}` : '';
+  if (!s || key === stolenKey) {
+    if (!s) stolenKey = '';
+    return;
+  }
+  stolenKey = key;
+  const card = RESOURCE_NAMES[s.card];
+  toast(s.to === v.you ? `You took ${card} from ${colorName(v, s.from)}` : `${colorName(v, s.to)} took your ${card}`, s.to === v.you ? 'good' : 'bad');
+}
 
 function render() {
   document.body.style.removeProperty('--player');
@@ -128,6 +147,7 @@ function render() {
       el('div', { class: 'middle' }, actions(v), handView(v.me.hand)),
       el('footer', { class: 'log' }, v.log[0]?.text ?? ''),
       offerOverlay(v),
+      robberOverlay(v),
       sheet === 'trade' ? tradeSheet(v) : null,
       sheet === 'pad' ? padSheet() : null,
     ),
@@ -137,8 +157,27 @@ function render() {
 function topBar(v: PhoneView) {
   const me = v.me!;
   const mine = v.current === v.you;
+  const rb = v.robber;
   let status: string;
-  if (v.phase === 'setup') {
+  if (rb) {
+    const waiting = rb.owed.flatMap((n, s) => (n > 0 && s !== v.you ? [colorName(v, s)] : []));
+    status =
+      rb.stage === 'discard'
+        ? rb.owed[v.you!] > 0
+          ? `A 7! Discard ${rb.owed[v.you!]} cards`
+          : `A 7: waiting for ${waiting.join(', ')} to discard`
+        : rb.stage === 'move'
+          ? mine
+            ? 'Move the thief: tap a tile on the board, then ✓'
+            : `${colorName(v, v.current)} is moving the thief`
+          : rb.stage === 'choose'
+            ? mine
+              ? 'Pick whom to rob'
+              : `${colorName(v, v.current)} is picking whom to rob`
+            : mine
+              ? 'Take a card'
+              : `${colorName(v, v.current)} is taking a card from ${colorName(v, rb.victim!)}`;
+  } else if (v.phase === 'setup') {
     status = me.placing ? `Tap a glowing spot on the board for your ${me.placing}, then ✓` : me.setupNeed ? `Setup: place a ${me.setupNeed}` : `${colorName(v, v.current)} is placing`;
   } else if (me.placing) {
     status = `Tap a glowing spot on the board for your ${me.placing}, then ✓`;
@@ -164,6 +203,17 @@ function actions(v: PhoneView) {
   const me = v.me!;
   const c = me.can;
   const items: (HTMLElement | null)[] = [];
+  const rb = v.robber;
+  if (rb) {
+    if (rb.stage === 'choose' && v.current === v.you) {
+      for (const seat of rb.victims) {
+        const b = button('', 'secondary victim', () => act({ type: 'chooseVictim', seat }), `--victim:${PLAYER_HEX[v.seats[seat].color]}`);
+        b.append(el('span', { class: 'dot' }), `Rob ${colorName(v, seat)}`, el('small', {}, `${v.players[seat].cards} cards`));
+        items.push(b);
+      }
+    }
+    return el('nav', { class: 'actions' }, ...items);
+  }
   if (me.placing) {
     items.push(el('p', { class: 'hint' }, 'Tap a glowing spot on the board, then ✓ there.'));
     if (c.cancel && v.phase === 'main') items.push(button('Cancel', 'secondary', () => act({ type: 'cancel' })));
@@ -207,12 +257,13 @@ function handView(h: Hand) {
   const n = cards.length;
   const fan = el('div', { class: 'fan', 'aria-label': `${n} cards` });
   if (!n) fan.append(el('p', { class: 'hint empty' }, 'No cards yet'));
-  // Spread sideways as well as round, so each card's name shows; tighter as the hand grows.
-  const step = n > 1 ? Math.min(7, 56 / (n - 1)) : 0;
-  const spread = n > 1 ? Math.min(0.62, 4.2 / (n - 1)) : 0;
+  // Spread sideways as well as round, tighter as the hand grows, but never wider than the space.
+  const step = n > 1 ? Math.min(7, 30 / (n - 1)) : 0;
+  // The outer cards lean out by about a card's width at full tilt, so leave room for that too.
+  const gap = n > 1 ? `min(0.62 * var(--card-w), (100% - 2.2 * var(--card-w)) / ${n - 1})` : '0px';
   cards.forEach((r, i) => {
     const k = i - (n - 1) / 2;
-    fan.append(card(r, { style: `transform:translateX(calc(-50% + ${k * spread} * var(--card-w))) rotate(${k * step}deg);z-index:${i}` }));
+    fan.append(card(r, `left:calc(50% + ${k} * ${gap});transform:translateX(-50%) rotate(${k * step}deg);z-index:${i}`));
   });
   const counts = el(
     'div',
@@ -244,12 +295,62 @@ function offerOverlay(v: PhoneView) {
       'div',
       { class: 'sheet offer' },
       el('h2', {}, `${colorName(v, o.from)} offers a trade`),
-      el('div', { class: 'trade-line' }, el('span', {}, 'You get'), ...costChips(o.give)),
-      el('div', { class: 'trade-line' }, el('span', {}, 'You give'), ...costChips(o.get)),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You get'), ...costChips(o.give)),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You give'), ...costChips(o.get)),
       !canPay && el('p', { class: 'hint' }, 'You don’t have those cards.'),
       el('div', { class: 'row' }, button('Decline', 'secondary', () => act({ type: 'respond', accept: false })), accept),
     ),
   );
+}
+
+/** The 7 on the phone: choosing discards, picking a face-down card, or watching yours be picked. */
+function robberOverlay(v: PhoneView) {
+  const rb = v.robber;
+  const me = v.me!;
+  if (!rb) return null;
+  if (rb.stage === 'discard' && rb.owed[v.you!] > 0) {
+    const owed = rb.owed[v.you!];
+    const picked = handSize(discardDraft);
+    const ok = button(`Discard ${owed}`, 'primary', () => act({ type: 'discard', cards: discardDraft }));
+    ok.disabled = picked !== owed;
+    return el(
+      'div',
+      { class: 'sheet-back' },
+      el(
+        'div',
+        { class: 'sheet discard' },
+        el('h2', {}, `A 7! Discard ${owed} of your ${handSize(me.hand)} cards`),
+        el('div', { class: 'trade-line' }, ...RESOURCES.map((r) => stepper(r, discardDraft, picked < owed ? me.hand[r] : discardDraft[r]))),
+        el('div', { class: 'row' }, el('span', { class: 'count' }, `${picked} of ${owed} picked`), ok),
+      ),
+    );
+  }
+  if (rb.stage === 'steal' && v.current === v.you) {
+    const backs = Array.from({ length: rb.count }, (_, index) => {
+      const b = button('', 'card-back', () => act({ type: 'steal', index }));
+      b.setAttribute('aria-label', `Card ${index + 1}`);
+      return b;
+    });
+    return el(
+      'div',
+      { class: 'sheet-back' },
+      el('div', { class: 'sheet steal' }, el('h2', {}, `Take one of ${colorName(v, rb.victim!)}'s cards`), el('div', { class: 'backs' }, ...backs)),
+    );
+  }
+  if (rb.stage === 'steal' && v.myOrder) {
+    return el(
+      'div',
+      { class: 'sheet-back' },
+      el(
+        'div',
+        { class: 'sheet steal' },
+        el('h2', {}, `${colorName(v, v.current)} is taking one of your cards`),
+        el('p', { class: 'hint' }, 'They see these face down, in this order.'),
+        el('div', { class: 'backs' }, ...v.myOrder.map((r) => card(r))),
+      ),
+    );
+  }
+  return null;
 }
 
 function tradeSheet(v: PhoneView) {
@@ -274,7 +375,7 @@ function tradeSheet(v: PhoneView) {
       bankGive = bankGet = null;
     });
     ok.disabled = !bankGive || !bankGet || bankGive === bankGet || me.hand[bankGive] < me.rates[bankGive];
-    body = [el('div', { class: 'trade-line' }, el('span', {}, 'Give'), ...giveRow), el('div', { class: 'trade-line' }, el('span', {}, 'Get 1'), ...getRow), el('div', { class: 'row' }, button('Close', 'secondary', close), ok)];
+    body = [el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'Give'), ...giveRow), el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'Get 1'), ...getRow), el('div', { class: 'row' }, button('Close', 'secondary', close), ok)];
   } else {
     const to = tradeWith;
     const send = button('Send offer', 'primary', () => {
@@ -286,8 +387,8 @@ function tradeSheet(v: PhoneView) {
     });
     send.disabled = !handSize(offerGive) || !handSize(offerGet);
     body = [
-      el('div', { class: 'trade-line' }, el('span', {}, 'You give'), ...RESOURCES.map((r) => stepper(r, offerGive, me.hand[r]))),
-      el('div', { class: 'trade-line' }, el('span', {}, 'You get'), ...RESOURCES.map((r) => stepper(r, offerGet, 9))),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You give'), ...RESOURCES.map((r) => stepper(r, offerGive, me.hand[r]))),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You get'), ...RESOURCES.map((r) => stepper(r, offerGet, 9))),
       el('div', { class: 'row' }, button('Close', 'secondary', close), send),
     ];
   }
@@ -298,8 +399,9 @@ function stepper(r: Resource, h: Hand, max: number) {
   const minus = button('−', 'step', () => ((h[r] = Math.max(0, h[r] - 1)), render()));
   const plus = button('+', 'step', () => {
     h[r] = Math.min(max, h[r] + 1);
-    // The same card can't be on both sides.
-    (h === offerGive ? offerGet : offerGive)[r] = 0;
+    // The same card can't be on both sides of a trade.
+    if (h === offerGive) offerGet[r] = 0;
+    if (h === offerGet) offerGive[r] = 0;
     render();
   });
   minus.disabled = h[r] === 0;
@@ -349,10 +451,10 @@ function show(node: HTMLElement) {
   root.replaceChildren(node);
 }
 
-function toast(message: string) {
-  const t = el('div', { class: 'toast', role: 'status' }, message);
+function toast(message: string, kind: 'bad' | 'good' = 'bad') {
+  const t = el('div', { class: `toast ${kind}`, role: 'status' }, message);
   document.body.append(t);
-  window.setTimeout(() => t.remove(), 3000);
+  window.setTimeout(() => t.remove(), 3500);
 }
 
 render();

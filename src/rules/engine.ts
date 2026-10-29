@@ -1,5 +1,6 @@
 import type { ResourceTerrain } from '../board/generate';
-import { rollDice, THIEF_NUMBER, type Dice } from '../game/dice';
+import type { Rng } from '../board/rng';
+import { cryptoRng, rollDice, THIEF_NUMBER, type Dice } from '../game/dice';
 import { PLAYER_NAMES } from '../game/players';
 import { moveThief, nextTurn, recordRoll, type GameState } from '../game/state';
 import { boardGeometry, type Geometry } from './geometry';
@@ -59,13 +60,37 @@ export interface LastBuild {
   granted: Hand;
 }
 
+/**
+ * After a 7: everyone over 7 cards discards half (all at once), then the roller moves the
+ * thief, picks whom to rob if there's a choice, and takes one of their cards face down.
+ */
+export interface Robber {
+  stage: 'discard' | 'move' | 'choose' | 'steal';
+  /** Cards each seat still has to discard. */
+  owed: number[];
+  /** The tile tapped for the thief, waiting for ✓. */
+  tile: number | null;
+  /** Players the roller may rob, once the thief has moved. */
+  victims: number[];
+  victim: number | null;
+  /** The victim's cards in the order they're laid face down, shuffled fresh for this steal. */
+  order: Resource[];
+}
+
+/** The last card taken, so the two players involved can be told which it was. */
+export interface Steal {
+  from: number;
+  to: number;
+  card: Resource;
+}
+
 export interface LogEntry {
   seat: number | null;
   text: string;
 }
 
 export interface RulesState {
-  version: 1;
+  version: 2;
   phase: 'setup' | 'main';
   /** Seats in setup order: once round from the first player, then back the other way. */
   setupOrder: number[];
@@ -82,6 +107,8 @@ export interface RulesState {
   pending: PendingBuild | null;
   offer: TradeOffer | null;
   lastBuild: LastBuild | null;
+  robber: Robber | null;
+  lastSteal: Steal | null;
   log: LogEntry[];
 }
 
@@ -103,10 +130,13 @@ export type Action =
   | { type: 'withdraw' }
   | { type: 'respond'; accept: boolean }
   | { type: 'endTurn' }
-  | { type: 'moveThief'; tile: number };
+  | { type: 'moveThief'; tile: number }
+  | { type: 'discard'; cards: Hand }
+  | { type: 'chooseVictim'; seat: number }
+  | { type: 'steal'; index: number };
 
 /** What just happened, for the board's animations. */
-export type RulesEvent = 'roll' | 'turn' | 'build' | 'pending' | 'trade' | 'thief' | 'undo';
+export type RulesEvent = 'roll' | 'turn' | 'build' | 'pending' | 'trade' | 'thief' | 'undo' | 'robber';
 
 export type Result = { ok: true; table: Table; event: RulesEvent; roll?: GameState['lastRoll'] } | { ok: false; reason: string };
 
@@ -141,7 +171,7 @@ export function createRules(game: GameState): RulesState {
   const n = game.colors.length;
   const round = Array.from({ length: n }, (_, i) => (game.firstSeat + i) % n);
   return {
-    version: 1,
+    version: 2,
     phase: 'setup',
     setupOrder: [...round, ...round.slice().reverse()],
     setupStep: 0,
@@ -154,6 +184,8 @@ export function createRules(game: GameState): RulesState {
     pending: null,
     offer: null,
     lastBuild: null,
+    robber: null,
+    lastSteal: null,
     log: [{ seat: null, text: 'Setup: each player places a settlement and a road, then again in reverse order.' }],
   };
 }
@@ -235,8 +267,9 @@ export function setupNeed(t: Table, seat: number): 'settlement' | 'road' | null 
 const fail = (reason: string): Result => ({ ok: false, reason });
 
 /** Applies one player's action. Board actions are made on behalf of the current player. */
-export function apply(t: Table, seat: number, action: Action, roll: () => Dice = rollDice): Result {
+export function apply(t: Table, seat: number, action: Action, roll: () => Dice = rollDice, random: Rng = cryptoRng): Result {
   const r = t.rules;
+  if (r.robber && !ROBBER_ACTIONS.has(action.type)) return fail(robberWait(t));
   const current = t.game.current;
   const name = PLAYER_NAMES[t.game.colors[seat]] ?? '';
   const isCurrent = seat === current;
@@ -258,8 +291,8 @@ export function apply(t: Table, seat: number, action: Action, roll: () => Dice =
         total = action.total;
       }
       const game = recordRoll(t.game, { total, dice });
-      const rules = { ...r, rolled: true, lastBuild: null };
-      const produced = total === THIEF_NUMBER ? rules : produce({ game, rules }, total);
+      const rules: RulesState = { ...r, rolled: true, lastBuild: null, lastSteal: null };
+      const produced = total === THIEF_NUMBER ? { ...rules, robber: startRobber(rules) } : produce({ game, rules }, total);
       return done({ game, rules: log(produced, seat, `${name} rolled ${total}`) }, 'roll', game.lastRoll);
     }
 
@@ -287,10 +320,12 @@ export function apply(t: Table, seat: number, action: Action, roll: () => Dice =
     }
 
     case 'cancel':
+      if (isCurrent && r.robber?.stage === 'move' && r.robber.tile !== null) return done({ ...t, rules: { ...r, robber: { ...r.robber, tile: null } } }, 'robber');
       if (!isCurrent || !r.pending) return fail('Nothing to cancel');
       return done({ ...t, rules: { ...r, pending: null } }, 'pending');
 
     case 'confirm':
+      if (isCurrent && r.robber?.stage === 'move' && r.robber.tile !== null) return placeThief(t, seat, r.robber.tile, random);
       if (!isCurrent || !r.pending || r.pending.at === null) return fail('Pick a spot first');
       return place(t, seat, r.pending.kind, r.pending.at);
 
@@ -349,18 +384,113 @@ export function apply(t: Table, seat: number, action: Action, roll: () => Dice =
       if (r.phase !== 'main') return fail('Finish setup first');
       if (!r.rolled) return fail('Roll first');
       if (r.pending) return fail('Finish building first');
-      return done({ game: nextTurn(t.game), rules: { ...r, rolled: false, offer: null, lastBuild: null } }, 'turn');
+      return done({ game: nextTurn(t.game), rules: { ...r, rolled: false, offer: null, lastBuild: null, lastSteal: null } }, 'turn');
     }
 
     case 'moveThief': {
-      // Milestone 8 ties this to rolling a 7 and adds the steal.
-      if (r.phase !== 'main') return fail('Finish setup first');
-      const game = moveThief(t.game, action.tile);
-      if (game === t.game) return fail('Pick another tile');
-      return done({ game, rules: { ...r, lastBuild: null } }, 'thief');
+      // Tapping a tile only shows where the thief would go; ✓ moves it.
+      const rb = r.robber;
+      if (!rb || rb.stage !== 'move') return fail('The thief moves after a 7');
+      if (!isCurrent) return fail('Not your turn');
+      const tiles = t.game.board.tiles.length;
+      if (!Number.isInteger(action.tile) || action.tile < 0 || action.tile >= tiles || action.tile === t.game.thiefTile) return fail('Pick another tile');
+      return done({ ...t, rules: { ...r, robber: { ...rb, tile: action.tile } } }, 'robber');
+    }
+
+    case 'discard': {
+      const rb = r.robber;
+      if (!rb || rb.stage !== 'discard' || !rb.owed[seat]) return fail('Nothing to discard');
+      if (!isHand(action.cards) || handSize(action.cards) !== rb.owed[seat]) return fail(`Discard exactly ${rb.owed[seat]} cards`);
+      if (!covers(r.hands[seat], action.cards)) return fail('You don’t have those cards');
+      const owed = rb.owed.slice();
+      owed[seat] = 0;
+      const stage = owed.some((n) => n > 0) ? 'discard' : 'move';
+      const rules = move(r, seat, 'bank', hand(action.cards));
+      return done({ ...t, rules: log({ ...rules, robber: { ...rb, owed, stage } }, seat, `${name} discarded ${handSize(action.cards)} cards`) }, 'robber');
+    }
+
+    case 'chooseVictim': {
+      const rb = r.robber;
+      if (!rb || rb.stage !== 'choose') return fail('No one to rob now');
+      if (!isCurrent) return fail('Not your turn');
+      if (!rb.victims.includes(action.seat)) return fail('Pick a player next to the thief');
+      return done({ ...t, rules: { ...r, robber: aimAt(r, rb, action.seat, random) } }, 'robber');
+    }
+
+    case 'steal': {
+      const rb = r.robber;
+      if (!rb || rb.stage !== 'steal' || rb.victim === null) return fail('Nothing to take');
+      if (!isCurrent) return fail('Not your turn');
+      if (!Number.isInteger(action.index) || action.index < 0 || action.index >= rb.order.length) return fail('Pick one of the cards');
+      const card = rb.order[action.index];
+      const rules = move(r, rb.victim, seat, hand({ [card]: 1 }));
+      const other = PLAYER_NAMES[t.game.colors[rb.victim]];
+      return done(
+        { ...t, rules: log({ ...rules, robber: null, lastSteal: { from: rb.victim, to: seat, card } }, seat, `${name} took a card from ${other}`) },
+        'robber',
+      );
     }
   }
   return fail('Unknown action');
+}
+
+/** While the thief is out, only these moves are open; anything else waits. */
+const ROBBER_ACTIONS = new Set<Action['type']>(['discard', 'moveThief', 'confirm', 'cancel', 'chooseVictim', 'steal']);
+
+function robberWait(t: Table): string {
+  const stage = t.rules.robber!.stage;
+  if (stage === 'discard') return 'Waiting for discards';
+  if (stage === 'move') return 'Move the thief first';
+  return 'Finish the steal first';
+}
+
+/** Half (rounded down) for everyone over 7 cards. */
+export function discardsOwed(r: RulesState): number[] {
+  return r.hands.map((h) => (handSize(h) > 7 ? Math.floor(handSize(h) / 2) : 0));
+}
+
+function startRobber(r: RulesState): Robber {
+  const owed = discardsOwed(r);
+  return { stage: owed.some((n) => n > 0) ? 'discard' : 'move', owed, tile: null, victims: [], victim: null, order: [] };
+}
+
+/** Players with a building on `tile` and at least one card, other than the roller. */
+export function victimsAt(t: Table, tile: number, roller: number): number[] {
+  const g = geometryOf(t.game);
+  const seats = new Set<number>();
+  for (const s of g.spots) {
+    const b = t.rules.buildings[s.id];
+    if (b && b.seat !== roller && s.tiles.includes(tile) && handSize(t.rules.hands[b.seat]) > 0) seats.add(b.seat);
+  }
+  return [...seats].sort((a, b) => a - b);
+}
+
+/** Lays the victim's cards face down in a fresh random order. */
+function aimAt(r: RulesState, rb: Robber, victim: number, random: Rng): Robber {
+  const order = shuffle(RESOURCES.flatMap((res) => Array<Resource>(r.hands[victim][res]).fill(res)), random);
+  return { ...rb, stage: 'steal', victim, order };
+}
+
+/** Moves the thief, then goes straight to the steal when only one player can be robbed. */
+function placeThief(t: Table, seat: number, tile: number, random: Rng): Result {
+  const game = moveThief(t.game, tile);
+  if (game === t.game) return fail('Pick another tile');
+  const rb = t.rules.robber!;
+  const victims = victimsAt({ game, rules: t.rules }, tile, seat);
+  let robber: Robber | null = null;
+  if (victims.length === 1) robber = aimAt(t.rules, { ...rb, victims, tile: null }, victims[0], random);
+  else if (victims.length > 1) robber = { ...rb, stage: 'choose', victims, tile: null };
+  const name = PLAYER_NAMES[t.game.colors[seat]];
+  return done({ game, rules: log({ ...t.rules, robber }, seat, `${name} moved the thief`) }, 'thief');
+}
+
+function shuffle<T>(items: T[], random: Rng): T[] {
+  const a = items.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 function done(table: Table, event: RulesEvent, roll?: GameState['lastRoll']): Result {
@@ -492,7 +622,7 @@ export function isRulesState(r: unknown, game: GameState): r is RulesState {
   const n = game.colors.length;
   const seatOk = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) < n;
   return (
-    s.version === 1 &&
+    s.version === 2 &&
     (s.phase === 'setup' || s.phase === 'main') &&
     Array.isArray(s.setupOrder) &&
     s.setupOrder.length === 2 * n &&
@@ -514,6 +644,14 @@ export function isRulesState(r: unknown, game: GameState): r is RulesState {
     s.roads.length === g.paths.length &&
     s.roads.every((v) => v === null || seatOk(v)) &&
     typeof s.rolled === 'boolean' &&
+    (s.robber === null ||
+      (typeof s.robber === 'object' &&
+        ['discard', 'move', 'choose', 'steal'].includes(s.robber.stage) &&
+        Array.isArray(s.robber.owed) &&
+        s.robber.owed.length === n &&
+        Array.isArray(s.robber.victims) &&
+        Array.isArray(s.robber.order))) &&
+    (s.lastSteal === null || (typeof s.lastSteal === 'object' && RESOURCES.includes(s.lastSteal.card))) &&
     Array.isArray(s.log)
   );
 }

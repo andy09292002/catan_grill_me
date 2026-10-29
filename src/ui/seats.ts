@@ -22,13 +22,10 @@ const SAFE_HAND = 7;
 export function renderSeatBadges(container: HTMLElement, seats: SeatView[] | null, stats: SeatStats[], onTap: (seat: number) => void) {
   container.replaceChildren();
   if (!seats) return;
-  const hw = window.innerWidth / 2;
-  const hh = window.innerHeight / 2;
   seats.forEach((s, seat) => {
     const a = seatAngle(seat, seats.length);
     // Upside down for its owner, upright for the players across the table.
     const facing = a + 180;
-    const d = seatDirection(a);
     const st = stats[seat];
     const over = !!st && st.cards > SAFE_HAND;
     const badge = el(
@@ -46,26 +43,37 @@ export function renderSeatBadges(container: HTMLElement, seats: SeatView[] | nul
     );
     badge.addEventListener('click', () => onTap(seat));
     container.append(badge);
-
-    // Half the size of the turned badge, so it can sit right at the edge without clipping.
-    const r = (a * Math.PI) / 180;
-    const w = badge.offsetWidth;
-    const h = badge.offsetHeight;
-    const hx = (w * Math.abs(Math.cos(r)) + h * Math.abs(Math.sin(r))) / 2;
-    const hy = (w * Math.abs(Math.sin(r)) + h * Math.abs(Math.cos(r))) / 2;
-    // Follow the seat's direction to the screen edge, then slide along it out of the corners.
-    const reach = Math.min(Math.abs(d.x) > 1e-9 ? hw / Math.abs(d.x) : Infinity, Math.abs(d.y) > 1e-9 ? hh / Math.abs(d.y) : Infinity);
-    let x = d.x * reach;
-    let y = d.y * reach;
-    const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
-    if (Math.abs(x) >= hw - 1) {
-      x = Math.sign(x) * (hw - hx - EDGE_GAP);
-      y = clamp(y, hh - CORNER - hy);
-    } else {
-      y = Math.sign(y) * (hh - hy - EDGE_GAP);
-      x = clamp(x, hw - CORNER - hx);
-    }
-    badge.style.left = `${hw + x}px`;
-    badge.style.top = `${hh + y}px`;
+    placeAtEdge(badge, a);
   });
+}
+
+/**
+ * Puts a (centred, turned) element at the screen edge in the direction of seat angle `a`,
+ * `inset` pixels in from it and slid along the edge out of the corners. The element must
+ * already be in the page, so its size is known.
+ */
+export function placeAtEdge(node: HTMLElement, a: number, inset = 0) {
+  const hw = window.innerWidth / 2;
+  const hh = window.innerHeight / 2;
+  const d = seatDirection(a);
+  // Half the size of the turned element, so it can sit right at the edge without clipping.
+  const r = (a * Math.PI) / 180;
+  const w = node.offsetWidth;
+  const h = node.offsetHeight;
+  const hx = (w * Math.abs(Math.cos(r)) + h * Math.abs(Math.sin(r))) / 2;
+  const hy = (w * Math.abs(Math.sin(r)) + h * Math.abs(Math.cos(r))) / 2;
+  // Follow the seat's direction to the screen edge, then slide along it out of the corners.
+  const reach = Math.min(Math.abs(d.x) > 1e-9 ? hw / Math.abs(d.x) : Infinity, Math.abs(d.y) > 1e-9 ? hh / Math.abs(d.y) : Infinity);
+  let x = d.x * reach;
+  let y = d.y * reach;
+  const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
+  if (Math.abs(x) >= hw - 1) {
+    x = Math.sign(x) * (hw - hx - EDGE_GAP - inset);
+    y = clamp(y, hh - CORNER - hy);
+  } else {
+    y = Math.sign(y) * (hh - hy - EDGE_GAP - inset);
+    x = clamp(x, hw - CORNER - hx);
+  }
+  node.style.left = `${hw + x}px`;
+  node.style.top = `${hh + y}px`;
 }

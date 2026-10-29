@@ -14,8 +14,8 @@ The full design and every decision behind it are in [grillMe.md](grillMe.md).
 | 4 | Thief | Done |
 | 5 | Animation | Done |
 | 6 | Board + phones: local table server, joining by QR code, seat keys and rejoin | Done |
-| 7 | Board + phones: rules engine, building, trading, the phone hand | In review |
-| 8 | Board + phones: the 7, discards, the thief and face-down steals | Planned |
+| 7 | Board + phones: rules engine, building, trading, the phone hand | Done |
+| 8 | Board + phones: the 7, discards, the thief and face-down steals | In review |
 | 9 | Board + phones: development cards, Largest Army, Longest Road, winning | Planned |
 | 10 | Board + phones: 5–6 players, special build phase, a double-click exe | Planned |
 
@@ -83,10 +83,11 @@ Some routers also keep devices apart ("AP isolation" or a guest network); use th
 - **Rolling.** Tap **Roll** on your phone or on the board, or roll real dice and enter the total on either. Every settlement next to a tile with that number gets a card, every city two, straight into the phones. The thief's tile pays nothing.
 - **Building.** After rolling, your phone shows **Road**, **Settlement** and **City** with their costs; the ones you can afford light up. Pick one, then place it on the board as in setup. **Undo last** takes back your last piece until anything else happens. Buying and trades are final.
 - **Trading.** Talk it out, then on your phone tap **Trade**: either the **Bank** (4 for 1, or 3 or 2 for 1 with a harbor; your rates are shown) or another player, choosing what you give and get. They tap **Accept** or **Decline** on theirs.
+- **A 7.** Nobody gets cards. Everyone holding more than 7 discards half (rounded down), choosing on their own phone, all at the same time. Then the roller taps a tile on the board for the thief, and **✓**. If several players have a building there, the roller picks whom to rob on their phone; then their phone shows that player's cards face down, shuffled fresh, and they tap one. The victim watches their own cards in the same order and sees which one goes; only those two learn which card it was. A note at the roller's edge of the board shows where the 7 is up to.
 - **End turn** on your phone, or **Next turn** on the board.
 - Your phone, held sideways, shows your cards fanned like a hand. The panel at your edge of the board shows the other players your points and how many cards you hold (it faces into the table, since your phone already shows you), and glows red over 7.
 
-Still to come: a 7 only lets you move the thief for now (discarding and stealing arrive in milestone 8); development cards, Largest Army, Longest Road and the win in milestone 9.
+Still to come: development cards, Largest Army, Longest Road and the win in milestone 9. In Board + phones the thief moves only after a 7 (and, from milestone 9, a knight), so the board's **Thief** button is hidden.
 
 A URL like `?size=30&mode=balancedPlus&seed=12345&players=5&thief=physical` opens a fixed board for testing or sharing without touching the saved game. Modes are `random`, `balanced` and `balancedPlus`.
 
@@ -99,9 +100,11 @@ npm run screenshots
 node scripts/table.mjs
 ```
 
-`node scripts/table.mjs` also needs a build. It starts the table server on a spare port, opens the board and three phones in separate browsers, and checks joining, setup with pieces started on the phones and placed on the board, rolling from a phone, the trade sheet, ending a turn, a dropped phone coming back, moving a seat with the rejoin code, a server restart, and the sideways prompt. Its screenshots go to `screenshots/table/`.
+`node scripts/table.mjs` also needs a build. It starts the table server on a spare port, opens the board and three phones in separate browsers, and checks joining, setup with pieces started on the phones and placed on the board, rolling from a phone, the trade sheet, ending a turn, a 7 keyed in from physical dice with the thief moved on the board and a face-down card taken, a dropped phone coming back, moving a seat with the rejoin code, a server restart, and the sideways prompt. Its screenshots go to `screenshots/table/`.
 
-`npm test` includes bot games: bots play through the real server logic, mixing legal moves with nonsense, and every saved state is checked against the rules (no card made or lost, settlements apart, roads connected, refused moves change nothing). It plays 60 games; `SIM_GAMES=1000 npx vitest run server/sim` plays more.
+`npx tsx scripts/phone-shots.ts` (after a build) screenshots the phone at a phone's size from prepared games: a big hand, the discard sheet after a 7 and the trade sheet, into `screenshots/phone/`.
+
+`npm test` includes bot games: bots play through the real server logic, mixing legal moves with nonsense, and every saved state is checked against the rules (no card made or lost, settlements apart, roads connected, refused moves change nothing), 7s, discards and steals included. It plays 60 games; `SIM_GAMES=1000 npx vitest run server/sim` plays more.
 
 `npm run screenshots` needs a build first. It saves the New game screen, both boards, a mid-game roll, and the thief being moved and blocking a tile at 1920×1080, 1366×768, 2560×1440 and 1024×768 into `screenshots/`, using the installed Microsoft Edge. CI runs the tests and screenshots on every push and uploads the screenshots as a build artifact.
 

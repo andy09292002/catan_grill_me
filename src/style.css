@@ -1,3 +1,8 @@
+/* Hidden means hidden, whatever display an element's class sets. */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   --control-size: clamp(64px, 9vmin, 112px);
   --corner-gap: clamp(10px, 2vmin, 28px);
@@ -678,4 +683,22 @@ body {
 .confirm-no {
   background: #c8392f;
   color: #fff;
+}
+
+.robber-note {
+  position: fixed;
+  z-index: 2;
+  max-width: min(640px, 70vw);
+  padding: 10px 18px;
+  border-radius: 14px;
+  border: 2px solid var(--red);
+  background: var(--panel-solid);
+  color: var(--ink);
+  font-size: clamp(16px, 2.2vmin, 22px);
+  font-weight: 800;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.robber-note[hidden] {
+  display: none;
 }

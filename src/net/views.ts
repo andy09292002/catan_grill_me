@@ -12,13 +12,27 @@ import {
   type Resource,
   type Table,
 } from '../rules/engine';
-import type { PhoneCan, PhoneMe, PublicRules } from './protocol';
+import type { PhoneCan, PhoneMe, PublicRobber, PublicRules } from './protocol';
 
 // What each device is shown. The board gets only public information; a phone also gets its
 // own hand. Nothing here ever reveals another player's cards.
 
 const BOARD_ACTIONS = new Set<Action['type']>(['roll', 'enterRoll', 'endTurn', 'moveThief', 'pick', 'confirm', 'cancel']);
-const PHONE_ACTIONS = new Set<Action['type']>(['roll', 'enterRoll', 'build', 'cancel', 'undo', 'bankTrade', 'offer', 'withdraw', 'respond', 'endTurn']);
+const PHONE_ACTIONS = new Set<Action['type']>([
+  'roll',
+  'enterRoll',
+  'build',
+  'cancel',
+  'undo',
+  'bankTrade',
+  'offer',
+  'withdraw',
+  'respond',
+  'endTurn',
+  'discard',
+  'chooseVictim',
+  'steal',
+]);
 
 /** Board actions are picks and ✓ / ✗ on the board, dice and Next turn; phones do the rest. */
 export function allowedFrom(device: 'board' | 'phone', action: Action): boolean {
@@ -41,7 +55,14 @@ export function publicRules(t: Table): PublicRules {
       legal: legalPlaces(t, t.game.current, r.pending.kind),
       at: r.pending.at,
     },
+    robber: publicRobber(t),
   };
+}
+
+export function publicRobber(t: Table): PublicRobber | null {
+  const rb = t.rules.robber;
+  if (!rb) return null;
+  return { stage: rb.stage, owed: rb.owed, tile: rb.tile, victims: rb.victims, victim: rb.victim, count: rb.order.length };
 }
 
 const works = (t: Table, seat: number, action: Action) => apply(t, seat, action, () => [1, 1]).ok;
@@ -55,7 +76,7 @@ export function phoneMe(t: Table, seat: number): PhoneMe {
     build: Object.fromEntries(kinds.map((k) => [k, works(t, seat, { type: 'build', kind: k })])) as Record<BuildKind, boolean>,
     cancel: works(t, seat, { type: 'cancel' }),
     undo: works(t, seat, { type: 'undo' }),
-    trade: mine && r.phase === 'main' && r.rolled && !r.pending,
+    trade: mine && r.phase === 'main' && r.rolled && !r.pending && !r.robber,
     endTurn: works(t, seat, { type: 'endTurn' }),
   };
   return {

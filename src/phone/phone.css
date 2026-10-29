@@ -258,6 +258,9 @@ button:disabled {
 .fan {
   --card-w: clamp(70px, 24vh, 120px);
   position: relative;
+  /* The cards stack among themselves only, so a sheet above the hand stays on top. */
+  isolation: isolate;
+  z-index: 0;
   flex: 1;
   min-height: 140px;
   overflow: hidden;
@@ -288,9 +291,17 @@ button:disabled {
 }
 .card img {
   width: 72%;
+  margin-top: 12%;
+}
+.backs .card .card-name {
+  position: static;
 }
 .card-name {
-  padding: 1px 6px;
+  /* In the corner, like a playing card's index, so it shows even when cards overlap. */
+  position: absolute;
+  top: 5px;
+  left: 4px;
+  padding: 1px 5px;
   border-radius: 6px;
   background: rgba(253, 246, 227, 0.92);
   color: #1a1406;
@@ -351,8 +362,8 @@ button:disabled {
   gap: 6px;
   margin-bottom: 10px;
 }
-.trade-line > span:first-child {
-  width: 64px;
+.trade-line > .label {
+  flex: 0 0 64px;
   font-weight: 800;
   color: var(--ink-muted);
 }
@@ -390,18 +401,22 @@ button:disabled {
 .stepper {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 4px;
+  gap: 2px;
+  padding: 2px 3px;
   border-radius: 12px;
   border: 1.5px solid var(--panel-edge);
 }
 .stepper b {
-  min-width: 18px;
+  min-width: 16px;
   text-align: center;
 }
+.stepper .res-chip img {
+  width: 20px;
+  height: 20px;
+}
 .step {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 9px;
   border: 1.5px solid var(--panel-edge);
   background: rgba(255, 255, 255, 0.06);
@@ -455,4 +470,55 @@ button:disabled {
   background: #c8392f;
   color: #fff;
   font-weight: 800;
+}
+
+/* The 7: discarding, and picking a face-down card. */
+
+.trade-line .stepper {
+  flex: 0 0 auto;
+}
+.count {
+  margin-right: auto;
+  font-weight: 800;
+  color: var(--ink-muted);
+}
+.backs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.backs .card {
+  position: static;
+  transform: none;
+  width: 64px;
+}
+.card-back {
+  width: 64px;
+  aspect-ratio: 5 / 7;
+  border-radius: 10px;
+  border: 3px solid #fdf6e3;
+  background: repeating-linear-gradient(45deg, #1b5f93 0 8px, #154c77 8px 16px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.card-back:active {
+  transform: translateY(-6px);
+}
+.victim {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.victim .dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--victim);
+}
+.victim small {
+  margin-left: auto;
+  color: var(--ink-muted);
+}
+.toast.good {
+  background: #2f8f46;
 }

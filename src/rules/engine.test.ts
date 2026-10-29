@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createRng } from '../board/rng';
 import { createGame, type NewGameOptions } from '../game/state';
 import {
   apply,
@@ -15,6 +16,7 @@ import {
   RESOURCES,
   startTable,
   TERRAIN_RESOURCE,
+  victimsAt,
   type Action,
   type BuildKind,
   type Hand,
@@ -25,8 +27,8 @@ const OPTIONS: NewGameOptions = { colors: ['red', 'blue', 'white'], firstSeat: 0
 
 const fresh = (o: Partial<NewGameOptions> = {}) => startTable(createGame({ ...OPTIONS, ...o }));
 
-function act(t: Table, seat: number, a: Action, roll?: () => [number, number]): Table {
-  const r = apply(t, seat, a, roll);
+function act(t: Table, seat: number, a: Action, roll?: () => [number, number], random?: () => number): Table {
+  const r = apply(t, seat, a, roll, random);
   if (!r.ok) throw new Error(`${a.type}: ${r.reason}`);
   return r.table;
 }
@@ -432,5 +434,149 @@ describe('saved rules', () => {
     hands[0] = { ...hands[0], ore: hands[0].ore + 1 };
     expect(isRulesState({ ...t.rules, hands }, t.game)).toBe(false);
     expect(isRulesState({ ...t.rules, roads: t.rules.roads.slice(1) }, t.game)).toBe(false);
+  });
+});
+
+/**
+ * A table after setup, with `victims` each owning a settlement on one tile (and nobody else
+ * there), each holding `cards`. Returns the tile too.
+ */
+function thiefTarget(victims: number[], cards: Partial<Hand> = { wood: 1, ore: 2 }) {
+  let t = finishSetup(fresh());
+  const g = geometryOf(t.game);
+  const tile = t.game.board.tiles.findIndex((tl, id) => tl.terrain !== 'desert' && id !== t.game.thiefTile);
+  const corners = g.spots.filter((s) => s.tiles.includes(tile)).map((s) => s.id);
+  // Walk round the hex: every other corner is two paths from the next, so three settlements fit.
+  const walk = [corners[0]];
+  while (walk.length < 6) walk.push(g.spots[walk.at(-1)!].neighbors.find((n) => corners.includes(n) && !walk.includes(n))!);
+  const ring = [walk[0], walk[2], walk[4]];
+  const buildings = t.rules.buildings.map((b, spot) => (corners.includes(spot) || g.spots[spot].neighbors.some((n) => corners.includes(n)) ? null : b));
+  victims.forEach((v, i) => (buildings[ring[i]] = { seat: v, kind: 'settlement' }));
+  t = { ...t, rules: { ...t.rules, buildings } };
+  for (const v of victims) t = withCards(t, v, cards);
+  return { t, tile };
+}
+
+const seven = (t: Table) => rolled(t, 7);
+
+describe('the 7', () => {
+  it('asks everyone over 7 cards to discard half, rounded down, and pays nobody', () => {
+    let t = finishSetup(fresh());
+    t = withCards(withCards(withCards(t, 0, { wood: 9 }), 1, { ore: 8 }), 2, { grain: 7 });
+    const after = seven(t);
+    expect(after.rules.robber).toMatchObject({ stage: 'discard', owed: [4, 4, 0] });
+    expect(after.rules.hands).toEqual(t.rules.hands);
+  });
+
+  it('goes straight to moving the thief when nobody is over 7', () => {
+    expect(seven(finishSetup(fresh())).rules.robber).toMatchObject({ stage: 'move', owed: [0, 0, 0] });
+  });
+
+  it('holds everything else until the thief is done', () => {
+    let t = withCards(finishSetup(fresh()), 1, { ore: 8 });
+    t = withCards(seven(t), 0, { ...COSTS.road, wood: 5 });
+    expect(rejects(t, 0, { type: 'build', kind: 'road' })).toBe('Waiting for discards');
+    expect(rejects(t, 0, { type: 'bankTrade', give: 'wood', get: 'ore' })).toBe('Waiting for discards');
+    expect(rejects(t, 0, { type: 'endTurn' })).toBe('Waiting for discards');
+    t = act(t, 1, { type: 'discard', cards: hand({ ore: 4 }) });
+    expect(rejects(t, 0, { type: 'endTurn' })).toBe('Move the thief first');
+  });
+
+  it('takes exactly the owed cards from the player’s own hand, in any order', () => {
+    let t = finishSetup(fresh());
+    t = withCards(withCards(t, 0, { wood: 5, brick: 4 }), 2, { grain: 10 });
+    t = seven(t);
+    expect(rejects(t, 1, { type: 'discard', cards: hand({ wood: 1 }) })).toMatch(/Nothing/);
+    expect(rejects(t, 0, { type: 'discard', cards: hand({ wood: 3 }) })).toMatch(/exactly 4/);
+    expect(rejects(t, 0, { type: 'discard', cards: hand({ ore: 4 }) })).toMatch(/don’t have/);
+    // The later seat may go first: discards happen at the same time.
+    t = act(t, 2, { type: 'discard', cards: hand({ grain: 5 }) });
+    expect(t.rules.robber!.stage).toBe('discard');
+    expect(rejects(t, 2, { type: 'discard', cards: hand({ grain: 1 }) })).toMatch(/Nothing/);
+    t = act(t, 0, { type: 'discard', cards: hand({ wood: 2, brick: 2 }) });
+    expect(t.rules.robber!.stage).toBe('move');
+    expect(t.rules.hands[0]).toEqual(hand({ wood: 3, brick: 2 }));
+    expect(t.rules.hands[2]).toEqual(hand({ grain: 5 }));
+    expect(cardsInPlay(t)).toEqual(RESOURCES.map(() => BANK_EACH));
+  });
+
+  it('moves the thief only to another tile, only by the roller, and only after ✓', () => {
+    let t = seven(finishSetup(fresh()));
+    const from = t.game.thiefTile!;
+    expect(rejects(t, 1, { type: 'moveThief', tile: (from + 1) % 19 })).toBe('Not your turn');
+    expect(rejects(t, 0, { type: 'moveThief', tile: from })).toMatch(/another tile/);
+    expect(rejects(t, 0, { type: 'moveThief', tile: 19 })).toMatch(/another tile/);
+    t = act(t, 0, { type: 'moveThief', tile: (from + 1) % 19 });
+    expect(t.game.thiefTile).toBe(from);
+    t = act(t, 0, { type: 'cancel' });
+    expect(t.rules.robber!.tile).toBeNull();
+    expect(rejects(t, 0, { type: 'confirm' })).toMatch(/Pick/);
+    t = act(act(t, 0, { type: 'moveThief', tile: (from + 2) % 19 }), 0, { type: 'confirm' });
+    expect(t.game.thiefTile).toBe((from + 2) % 19);
+  });
+
+  it('can’t move the thief without a 7', () => {
+    const t = rolled(finishSetup(fresh()), 8);
+    expect(rejects(t, 0, { type: 'moveThief', tile: 3 })).toMatch(/after a 7/);
+  });
+
+  it('skips the steal when nobody else with cards is on the tile', () => {
+    const { t: base, tile } = thiefTarget([1], {});
+    let t = act(act(seven(base), 0, { type: 'moveThief', tile }), 0, { type: 'confirm' });
+    expect(t.rules.robber).toBeNull();
+    t = act(t, 0, { type: 'endTurn' });
+    expect(t.game.current).toBe(1);
+  });
+
+  it('never robs the roller, or anyone without cards', () => {
+    const { t, tile } = thiefTarget([0, 1, 2]);
+    expect(victimsAt(t, tile, 0)).toEqual([1, 2]);
+    expect(victimsAt(withCards(t, 2, {}), tile, 0)).toEqual([1]);
+  });
+
+  it('goes straight to the face-down pick when only one player can be robbed', () => {
+    const { t: base, tile } = thiefTarget([2]);
+    const t = act(act(seven(base), 0, { type: 'moveThief', tile }), 0, { type: 'confirm' });
+    expect(t.rules.robber).toMatchObject({ stage: 'steal', victim: 2 });
+    expect([...t.rules.robber!.order].sort()).toEqual(['ore', 'ore', 'wood']);
+  });
+
+  it('lets the roller choose when several players can be robbed', () => {
+    const { t: base, tile } = thiefTarget([1, 2]);
+    let t = act(act(seven(base), 0, { type: 'moveThief', tile }), 0, { type: 'confirm' });
+    expect(t.rules.robber).toMatchObject({ stage: 'choose', victims: [1, 2] });
+    expect(rejects(t, 0, { type: 'chooseVictim', seat: 0 })).toMatch(/next to the thief/);
+    expect(rejects(t, 1, { type: 'chooseVictim', seat: 2 })).toBe('Not your turn');
+    t = act(t, 0, { type: 'chooseVictim', seat: 1 });
+    expect(t.rules.robber).toMatchObject({ stage: 'steal', victim: 1 });
+  });
+
+  it('takes the card at the picked position, and records it for the two players', () => {
+    const { t: base, tile } = thiefTarget([2], { wool: 1, grain: 1, ore: 1 });
+    let t = act(act(seven(base), 0, { type: 'moveThief', tile }), 0, { type: 'confirm' });
+    const order = t.rules.robber!.order;
+    expect(rejects(t, 0, { type: 'steal', index: 3 })).toMatch(/one of the cards/);
+    expect(rejects(t, 2, { type: 'steal', index: 0 })).toBe('Not your turn');
+    t = act(t, 0, { type: 'steal', index: 1 });
+    const card = order[1];
+    expect(t.rules.hands[0][card]).toBe(base.rules.hands[0][card] + 1);
+    expect(t.rules.hands[2][card]).toBe(0);
+    expect(t.rules.lastSteal).toEqual({ from: 2, to: 0, card });
+    expect(t.rules.robber).toBeNull();
+    expect(cardsInPlay(t)).toEqual(RESOURCES.map(() => BANK_EACH));
+    // The game goes on: build, trade or end the turn.
+    expect(act(t, 0, { type: 'endTurn' }).rules.lastSteal).toBeNull();
+  });
+
+  it('shuffles the face-down cards fresh for every steal', () => {
+    const { t: base, tile } = thiefTarget([2], { wood: 1, brick: 1, wool: 1, grain: 1, ore: 1 });
+    const moved = act(seven(base), 0, { type: 'moveThief', tile });
+    const orders = new Set<string>();
+    for (let seed = 1; seed <= 20; seed++) {
+      const t = act(moved, 0, { type: 'confirm' }, undefined, createRng(seed));
+      expect([...t.rules.robber!.order].sort()).toEqual([...RESOURCES].sort());
+      orders.add(t.rules.robber!.order.join());
+    }
+    expect(orders.size).toBeGreaterThan(10);
   });
 });
