@@ -101,6 +101,38 @@ try {
   await board.waitForTimeout(700);
   await board.screenshot({ path: `${out}/05-board-after-setup.png` });
 
+  /** After a 7: the roller moves the thief next to the next player on the board, and takes a card face down. */
+  async function thiefAndSteal(seat, shots) {
+    const roller = phones[seat].page;
+    await board.waitForFunction(() => window.hexBoard.remote.rules.robber?.stage === 'move');
+    const target = (seat + 1) % 3;
+    const thiefNow = (await remote()).game.thiefTile;
+    const tile = (await board.evaluate((s) => window.hexBoard.tilesTouching(s), target)).find((id) => id !== thiefNow);
+    const tp = await board.evaluate((id) => window.hexBoard.tileOnScreen(id), tile);
+    await board.mouse.click(tp.x, tp.y);
+    await board.locator('#build-confirm:not([hidden])').waitFor();
+    await board.waitForTimeout(400);
+    if (shots) await board.screenshot({ path: `${out}/10-board-thief.png` });
+    await board.locator('#build-yes').click();
+    await board.waitForFunction((id) => window.hexBoard.game.thiefTile === id, tile);
+    check(true, 'a 7 lets the roller move the thief on the board');
+    const stage = (await remote()).rules.robber?.stage;
+    if (stage === 'choose') await roller.locator('button.victim').first().click();
+    if (stage) {
+      await roller.locator('.card-back').first().waitFor();
+      if (shots) await roller.screenshot({ path: `${out}/11-phone-steal.png` });
+      const victim = (await remote()).rules.robber.victim;
+      await phones[victim].page.getByText(/is taking one of your cards/).waitFor();
+      if (shots) await phones[victim].page.screenshot({ path: `${out}/12-phone-victim.png` });
+      const before = (await remote()).rules.cards;
+      await roller.locator('.card-back').first().click();
+      await board.waitForFunction(() => !window.hexBoard.remote.rules.robber);
+      const after7 = (await remote()).rules.cards;
+      check(after7[seat] === before[seat] + 1 && after7.reduce((a, b) => a + b) === before.reduce((a, b) => a + b), 'the face-down pick moves one card');
+      await roller.getByText(/^You took /).waitFor();
+    }
+  }
+
   const first = main.game.current;
   const turnText = (seat, viewer) => (seat === viewer ? 'Your turn' : `${phones[seat].color}'s turn`);
   const me = phones[first].page;
@@ -110,7 +142,8 @@ try {
   await board.waitForFunction(() => window.hexBoard.remote.rules.rolled);
   const rolled = (await remote()).game.lastRoll;
   check(rolled.dice && rolled.total === rolled.dice[0] + rolled.dice[1], `phone rolled ${rolled.total} on the server`);
-  if (rolled.total === 7) await board.getByRole('button', { name: 'Cancel' }).click();
+  // The dice are random: on a 7, deal with the thief first (nobody holds enough cards to discard yet).
+  if (rolled.total === 7) await thiefAndSteal(first, false);
   await me.getByRole('button', { name: 'End turn' }).waitFor();
   await me.waitForTimeout(300);
   await me.screenshot({ path: `${out}/07-phone-hand.png` });
@@ -130,33 +163,7 @@ try {
   const roller = phones[second].page;
   await roller.getByRole('button', { name: 'Enter dice' }).click();
   await roller.getByRole('button', { name: '7', exact: true }).click();
-  await board.waitForFunction(() => window.hexBoard.remote.rules.robber?.stage === 'move');
-  const target = (second + 1) % 3;
-  const thiefNow = (await remote()).game.thiefTile;
-  const tile = (await board.evaluate((s) => window.hexBoard.tilesTouching(s), target)).find((id) => id !== thiefNow);
-  const tp = await board.evaluate((id) => window.hexBoard.tileOnScreen(id), tile);
-  await board.mouse.click(tp.x, tp.y);
-  await board.locator('#build-confirm:not([hidden])').waitFor();
-  await board.waitForTimeout(400);
-  await board.screenshot({ path: `${out}/10-board-thief.png` });
-  await board.locator('#build-yes').click();
-  await board.waitForFunction((id) => window.hexBoard.game.thiefTile === id, tile);
-  check(true, 'a 7 lets the roller move the thief on the board');
-  const stage = (await remote()).rules.robber?.stage;
-  if (stage === 'choose') await roller.getByRole('button', { name: new RegExp(`^Rob ${phones[target].color}`) }).click();
-  if (stage) {
-    await roller.locator('.card-back').first().waitFor();
-    await roller.screenshot({ path: `${out}/11-phone-steal.png` });
-    const victim = (await remote()).rules.robber.victim;
-    await phones[victim].page.getByText(/is taking one of your cards/).waitFor();
-    await phones[victim].page.screenshot({ path: `${out}/12-phone-victim.png` });
-    const before = (await remote()).rules.cards;
-    await roller.locator('.card-back').first().click();
-    await board.waitForFunction(() => !window.hexBoard.remote.rules.robber);
-    const after7 = (await remote()).rules.cards;
-    check(after7[second] === before[second] + 1 && after7.reduce((a, b) => a + b) === before.reduce((a, b) => a + b), 'the face-down pick moves one card');
-    await roller.getByText(/^You took /).waitFor();
-  }
+  await thiefAndSteal(second, true);
   await roller.getByRole('button', { name: 'End turn' }).click();
   const third = (second + 1) % 3;
   await phones[third].page.getByText('Your turn').first().waitFor();
