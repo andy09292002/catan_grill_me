@@ -1,7 +1,9 @@
 import { rollDice } from '../src/game/dice';
 import { isGameState } from '../src/game/storage';
-import { createGame, moveThief, nextTurn, recordRoll, type GameState, type NewGameOptions } from '../src/game/state';
+import { createGame, type GameState, type NewGameOptions } from '../src/game/state';
 import type { BoardView, ClientMessage, PhoneView, SeatView, ServerMessage, TableEvent } from '../src/net/protocol';
+import { allowedFrom, phoneMe, publicRules } from '../src/net/views';
+import { apply, handSize, isRulesState, publicPoints, startTable, type Action, type RulesState } from '../src/rules/engine';
 
 /** One open connection: the board page or a phone. */
 export interface Conn {
@@ -12,10 +14,11 @@ export interface Conn {
 
 /** What the server keeps on disk, so a restarted PC carries on with the same game and phones. */
 export interface SavedTable {
-  version: 1;
+  version: 2;
   id: string;
   started: boolean;
   game: GameState;
+  rules: RulesState;
   /** Each seat's phone key, or null until a phone claims it. */
   keys: (string | null)[];
 }
@@ -35,10 +38,11 @@ export function isSavedTable(t: unknown): t is SavedTable {
   if (typeof t !== 'object' || t === null) return false;
   const s = t as SavedTable;
   return (
-    s.version === 1 &&
+    s.version === 2 &&
     typeof s.id === 'string' &&
     typeof s.started === 'boolean' &&
     isGameState(s.game) &&
+    isRulesState(s.rules, s.game) &&
     Array.isArray(s.keys) &&
     s.keys.length === s.game.colors.length &&
     s.keys.every((k) => k === null || typeof k === 'string')
@@ -111,6 +115,10 @@ export class Lobby {
 
   private fromPhone(conn: Conn, msg: ClientMessage) {
     const t = this.table;
+    if (msg.type === 'act') {
+      if (t?.started && conn.seat !== null) this.act(conn, conn.seat, msg.action, 'phone');
+      return;
+    }
     if (msg.type !== 'claim' || !t || conn.seat !== null) return;
     if (!isInt(msg.seat, 0, t.keys.length - 1) || t.keys[msg.seat] !== null) {
       conn.send({ type: 'error', message: 'That seat is taken' });
@@ -144,8 +152,9 @@ export class Lobby {
   private fromBoard(conn: Conn, msg: ClientMessage) {
     if (msg.type === 'create') {
       if (!isNewGameOptions(msg.options)) return;
-      const game = createGame(msg.options);
-      this.table = { version: 1, id: this.newId(), started: false, game, keys: game.colors.map(() => null) };
+      // The digital game always draws the thief on the board.
+      const { game, rules } = startTable(createGame({ ...msg.options, thiefStyle: 'onscreen' }));
+      this.table = { version: 2, id: this.newId(), started: false, game, rules, keys: game.colors.map(() => null) };
       this.rejoin.clear();
       for (const c of this.conns) if (c.role === 'phone') c.seat = null;
       this.changed({ kind: 'new' });
@@ -176,32 +185,27 @@ export class Lobby {
       }
     }
 
-    if (!t.started) return;
-    switch (msg.type) {
-      case 'roll': {
-        const dice = this.roll();
-        this.play(recordRoll(t.game, { total: dice[0] + dice[1], dice }), (game) => ({ kind: 'roll', roll: game.lastRoll! }));
-        return;
-      }
-      case 'enterRoll':
-        if (!isInt(msg.total, 2, 12)) return;
-        this.play(recordRoll(t.game, { total: msg.total, dice: null }), (game) => ({ kind: 'roll', roll: game.lastRoll! }));
-        return;
-      case 'nextTurn':
-        this.play(nextTurn(t.game), () => ({ kind: 'turn' }));
-        return;
-      case 'moveThief': {
-        if (!isInt(msg.tile, 0, t.game.board.tiles.length - 1)) return;
-        const game = moveThief(t.game, msg.tile);
-        if (game !== t.game) this.play(game, () => ({ kind: 'thief' }));
-        return;
-      }
-    }
+    if (msg.type === 'act' && t.started) this.act(conn, t.game.current, msg.action, 'board');
   }
 
-  private play(game: GameState, event: (game: GameState) => TableEvent) {
-    this.table!.game = game;
-    this.changed(event(game));
+  /** One move in the game, by `seat`; the board moves for the current player. */
+  private act(conn: Conn, seat: number, action: Action, device: 'board' | 'phone') {
+    const t = this.table!;
+    if (!allowedFrom(device, action)) return;
+    const result = apply({ game: t.game, rules: t.rules }, seat, action, this.roll);
+    if (!result.ok) {
+      conn.send({ type: 'error', message: result.reason });
+      return;
+    }
+    t.game = result.table.game;
+    t.rules = result.table.rules;
+    const event: TableEvent =
+      result.event === 'roll' && result.roll
+        ? { kind: 'roll', roll: result.roll }
+        : result.event === 'turn' || result.event === 'thief'
+          ? { kind: result.event }
+          : { kind: 'update' };
+    this.changed(event);
   }
 
   private changed(event?: TableEvent) {
@@ -235,12 +239,28 @@ export class Lobby {
 
   private boardView(): BoardView {
     const t = this.table!;
-    return { id: t.id, started: t.started, game: t.game, seats: this.seats(), joinUrl: this.opts.joinUrl };
+    const table = { game: t.game, rules: t.rules };
+    return { id: t.id, started: t.started, game: t.game, rules: publicRules(table), seats: this.seats(), joinUrl: this.opts.joinUrl };
   }
 
   private phoneView(conn: Conn): PhoneView {
     const t = this.table!;
-    return { id: t.id, started: t.started, seats: this.seats(), current: t.game.current, you: conn.seat };
+    const table = { game: t.game, rules: t.rules };
+    const seat = conn.seat;
+    const offer = t.rules.offer && seat !== null && (t.rules.offer.from === seat || t.rules.offer.to === seat) ? t.rules.offer : null;
+    return {
+      id: t.id,
+      started: t.started,
+      seats: this.seats(),
+      current: t.game.current,
+      you: seat,
+      phase: t.rules.phase,
+      lastRoll: t.game.lastRoll,
+      players: t.rules.hands.map((h, s) => ({ cards: handSize(h), points: publicPoints(t.rules, s) })),
+      me: seat === null ? null : phoneMe(table, seat),
+      offer,
+      log: t.rules.log.slice(0, 8),
+    };
   }
 }
 

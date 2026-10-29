@@ -6,28 +6,43 @@ import { el } from './dom';
 const CORNER = 240;
 const EDGE_GAP = 8;
 
+export interface SeatStats {
+  points: number;
+  cards: number;
+}
+
+/** More cards than this and a 7 costs half of them, so the panel warns. */
+const SAFE_HAND = 7;
+
 /**
- * A badge at each player's edge of the screen, facing them, showing whether their phone is
- * connected. Tapping one offers to move that seat to another phone.
+ * A panel at each player's edge of the screen: points, how many cards they hold, and whether
+ * their phone is connected. It faces into the table, so the other players read it; its owner
+ * sees the same on their phone. Tapping one offers to move that seat to another phone.
  */
-export function renderSeatBadges(container: HTMLElement, seats: SeatView[] | null, onTap: (seat: number) => void) {
+export function renderSeatBadges(container: HTMLElement, seats: SeatView[] | null, stats: SeatStats[], onTap: (seat: number) => void) {
   container.replaceChildren();
   if (!seats) return;
   const hw = window.innerWidth / 2;
   const hh = window.innerHeight / 2;
   seats.forEach((s, seat) => {
     const a = seatAngle(seat, seats.length);
+    // Upside down for its owner, upright for the players across the table.
+    const facing = a + 180;
     const d = seatDirection(a);
+    const st = stats[seat];
+    const over = !!st && st.cards > SAFE_HAND;
     const badge = el(
       'button',
       {
         type: 'button',
-        class: `seat-badge${s.connected ? '' : ' away'}`,
-        style: `transform:translate(-50%,-50%) rotate(${a}deg);--player:${PLAYER_HEX[s.color]}`,
-        'aria-label': `${PLAYER_NAMES[s.color]}: ${s.connected ? 'phone connected' : 'no phone'}. Tap to move to another phone`,
+        class: `seat-badge${s.connected ? '' : ' away'}${over ? ' over' : ''}`,
+        style: `transform:translate(-50%,-50%) rotate(${facing}deg);--player:${PLAYER_HEX[s.color]}`,
+        'aria-label': `${PLAYER_NAMES[s.color]}: ${st ? `${st.points} points, ${st.cards} cards, ` : ''}${s.connected ? 'phone connected' : 'no phone'}. Tap to move to another phone`,
       },
       el('span', { class: 'dot' }),
-      s.connected ? PLAYER_NAMES[s.color] : `${PLAYER_NAMES[s.color]} · no phone`,
+      el('span', { class: 'name' }, s.connected ? PLAYER_NAMES[s.color] : `${PLAYER_NAMES[s.color]} · no phone`),
+      st && el('span', { class: 'stat', title: 'Points' }, el('b', {}, String(st.points)), ' pts'),
+      st && el('span', { class: 'stat cards', title: 'Cards in hand' }, el('span', { class: 'card-icon' }), el('b', {}, String(st.cards))),
     );
     badge.addEventListener('click', () => onTap(seat));
     container.append(badge);

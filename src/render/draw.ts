@@ -6,6 +6,7 @@ import { seatEdge } from '../game/players';
 import { drawTerrainIcon, ICON_SPOTS, ICON_UNITS, turnSpot } from './animate';
 import { COLORS, drawIcon, harborLabel, TERRAIN_COLORS } from './art';
 import { fitBoard, type Fit } from './fit';
+import { drawPieces, type PiecesView } from './pieces';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -350,6 +351,8 @@ export interface View {
   thief: { tile: number; choosing: boolean; pulse: number } | null;
   /** Seconds on the animation clock, and how much the terrain art may move. */
   animation: { t: number; level: AnimationLevel };
+  /** Roads, settlements and cities, in Board + phones games. */
+  pieces?: PiecesView | null;
 }
 
 export const PLAIN_VIEW: View = {
@@ -381,6 +384,7 @@ export function drawLive(ctx: Ctx, board: Board, fit: Fit, width: number, height
   drawHighlight(ctx, board, fit, view);
   board.tiles.forEach((t) => drawToken(ctx, board, fit, t, view));
   view.highlight?.blocked.forEach((tile) => drawBlocked(ctx, board, fit, tile));
+  if (view.pieces) drawPieces(ctx, fit, view.pieces, view.textAngle);
   if (view.thief) drawThief(ctx, board, fit, view.thief, view.textAngle);
   if (view.glow) drawGlow(ctx, width, height, view.glow);
 }
