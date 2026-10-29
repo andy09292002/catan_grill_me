@@ -192,7 +192,7 @@ try {
       await blue.locator('.steal-replay').waitFor();
       await red.waitForTimeout(1200);
       await red.screenshot({ path: `${out}/steal-red-taken.png` });
-      await blue.waitForTimeout(300);
+      await blue.waitForTimeout(100);
       await blue.screenshot({ path: `${out}/steal-blue-taken.png` });
     });
   }

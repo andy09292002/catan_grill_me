@@ -666,6 +666,13 @@ button:disabled {
   width: 100%;
   transform: rotateY(180deg);
 }
+/* The victim's card starts face up and turns face down. */
+.backs .flip.face-down .flip-inner .card {
+  transform: none;
+}
+.flip.face-down .flip-inner .card-back {
+  transform: rotateY(180deg);
+}
 @keyframes lift {
   to {
     transform: translateY(-22px) scale(1.12);

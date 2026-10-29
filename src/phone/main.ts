@@ -136,18 +136,19 @@ function announceSteal(v: PhoneView) {
   stolenKey = key;
   const name = RESOURCE_NAMES[s.card];
   const title = s.to === v.you ? `You took ${name} from ${colorName(v, s.from)}` : `${colorName(v, s.to)} took your ${name}`;
-  // The row as it was, with the taken card lifting out of it: face down for the thief, turning over.
+  // The row as it was, with the taken card lifting out of it and turning over: face up for the
+  // thief, face down for the victim as it goes.
   let row: HTMLElement[] | null = null;
   if (s.to === v.you && s.index < lastBacks) {
     row = Array.from({ length: lastBacks }, (_, i) =>
       i === s.index ? el('div', { class: 'flip taken' }, el('div', { class: 'flip-inner' }, el('div', { class: 'card-back' }), card(s.card))) : el('div', { class: 'card-back' }),
     );
   } else if (s.from === v.you && lastOrder?.[s.index] === s.card) {
-    row = lastOrder.map((r, i) => {
-      const c = card(r);
-      if (i === s.index) c.classList.add('taken', 'leaving');
-      return c;
-    }).reverse();
+    row = lastOrder
+      .map((r, i) =>
+        i === s.index ? el('div', { class: 'flip face-down taken leaving' }, el('div', { class: 'flip-inner' }, card(r), el('div', { class: 'card-back' }))) : card(r),
+      )
+      .reverse();
   }
   lastOrder = null;
   lastBacks = 0;
