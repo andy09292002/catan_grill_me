@@ -2,7 +2,7 @@ import { PLAYER_HEX, PLAYER_NAMES, seatAngle, seatDirection } from '../game/play
 import type { SeatView } from '../net/protocol';
 import { el } from './dom';
 
-/** Room the corner controls take, so badges stay out of them. */
+/** Least room left for the corner controls, so badges stay out of them. */
 const CORNER = 240;
 const EDGE_GAP = 8;
 
@@ -74,14 +74,23 @@ export function placeAtEdge(node: HTMLElement, a: number, inset = 0) {
   const reach = Math.min(Math.abs(d.x) > 1e-9 ? hw / Math.abs(d.x) : Infinity, Math.abs(d.y) > 1e-9 ? hh / Math.abs(d.y) : Infinity);
   let x = d.x * reach;
   let y = d.y * reach;
-  const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
+  // Between the two corners at the ends of this edge, however much room their controls take.
+  const clamp = (v: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
   if (Math.abs(x) >= hw - 1) {
+    const side = x < 0 ? 'left' : 'right';
     x = Math.sign(x) * (hw - hx - EDGE_GAP - inset);
-    y = clamp(y, hh - CORNER - hy);
+    y = clamp(y, -hh + cornerRoom(`top-${side}`, 'height') + hy, hh - cornerRoom(`bottom-${side}`, 'height') - hy);
   } else {
+    const side = y < 0 ? 'top' : 'bottom';
     y = Math.sign(y) * (hh - hy - EDGE_GAP - inset);
-    x = clamp(x, hw - CORNER - hx);
+    x = clamp(x, -hw + cornerRoom(`${side}-left`, 'width') + hx, hw - cornerRoom(`${side}-right`, 'width') - hx);
   }
   node.style.left = `${hw + x}px`;
   node.style.top = `${hh + y}px`;
+}
+
+/** How far a corner's controls reach along an edge. */
+function cornerRoom(corner: string, along: 'width' | 'height'): number {
+  const box = document.querySelector(`.corner.${corner}`)?.getBoundingClientRect();
+  return Math.max(CORNER, (box?.[along] ?? 0) + EDGE_GAP);
 }

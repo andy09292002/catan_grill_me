@@ -263,8 +263,8 @@ describe('playing', () => {
     expect(order).toHaveLength(view().rules.cards[1]);
 
     t.say(t.phones[0], { type: 'act', action: { type: 'steal', index: 0 } });
-    expect(t.phones[0].last('phone')!.view.stolen).toEqual({ from: 1, to: 0, card: order[0] });
-    expect(t.phones[1].last('phone')!.view.stolen).toEqual({ from: 1, to: 0, card: order[0] });
+    expect(t.phones[0].last('phone')!.view.stolen).toEqual({ from: 1, to: 0, card: order[0], index: 0 });
+    expect(t.phones[1].last('phone')!.view.stolen).toEqual({ from: 1, to: 0, card: order[0], index: 0 });
     expect(t.phones[2].last('phone')!.view.stolen).toBeNull();
     // The board, in everyone's view, never says which card it was.
     expect(JSON.stringify(t.board.last('board'))).not.toMatch(/"card"|"stolen"|"lastSteal"/);

@@ -154,6 +154,48 @@ try {
     await board.getByText('Red wins!').waitFor();
     await board.screenshot({ path: `${out}/win-board.png` });
   });
+  // A 7 that takes one of Blue's cards: the face-down row, then the taken card lifting out of it
+  // on both phones. The board has a game's worth of rolls for its chart.
+  {
+    let steal = act(withHands(t, [{ wood: 2 }, { wood: 1, brick: 1, grain: 1, ore: 1 }, { wool: 2 }]), 0, { type: 'enterRoll', total: 7 });
+    const from = steal;
+    for (let tile = 0; tile < from.game.board.tiles.length; tile++) {
+      const moved = apply(from, 0, { type: 'moveThief', tile }, () => [3, 4]);
+      if (!moved.ok) continue;
+      let next = act(moved.table, 0, { type: 'confirm' });
+      if (next.rules.robber?.stage === 'choose' && next.rules.robber.victims.includes(1)) next = act(next, 0, { type: 'chooseVictim', seat: 1 });
+      if (next.rules.robber?.stage === 'steal' && next.rules.robber.victim === 1) {
+        steal = next;
+        break;
+      }
+    }
+    // Rolls from fair dice, for the chart.
+    let seed = 7;
+    const die = () => ((seed = (seed * 16807) % 2147483647), (seed % 6) + 1);
+    const history = Array.from({ length: 48 }, () => {
+      const dice: [number, number] = [die(), die()];
+      return { total: dice[0] + dice[1], dice };
+    });
+    steal = { ...steal, game: { ...steal.game, history: [steal.game.lastRoll!, ...history] } };
+    await withServer(steal, async (open) => {
+      const blue = await open(1);
+      await blue.getByText(/is taking one of your cards/).waitFor();
+      await blue.screenshot({ path: `${out}/steal-blue.png` });
+      const red = await open(0);
+      await red.getByText(/Take one of Blue/).waitFor();
+      await red.screenshot({ path: `${out}/steal-red.png` });
+      const board = await open('board');
+      await board.waitForTimeout(800);
+      await board.screenshot({ path: `${out}/rolls-board.png` });
+      await red.locator('.backs .card-back').first().click();
+      await red.locator('.steal-replay').waitFor();
+      await blue.locator('.steal-replay').waitFor();
+      await red.waitForTimeout(1200);
+      await red.screenshot({ path: `${out}/steal-red-taken.png` });
+      await blue.waitForTimeout(100);
+      await blue.screenshot({ path: `${out}/steal-blue-taken.png` });
+    });
+  }
   // Five players on the big board: after Red's turn, Blue's special build.
   let big = startTable(
     createGame({ colors: ['red', 'blue', 'white', 'orange', 'green'], firstSeat: 0, size: 30, mode: 'balanced', seed: 99, thiefStyle: 'onscreen' }),
