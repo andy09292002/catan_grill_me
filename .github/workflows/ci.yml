@@ -23,6 +23,9 @@ jobs:
       - run: node scripts/table.mjs
         env:
           SCREENSHOT_BROWSER: chromium
+      - run: npx tsx scripts/phone-shots.ts
+        env:
+          SCREENSHOT_BROWSER: chromium
       - uses: actions/upload-artifact@v7
         with:
           name: screenshots

@@ -102,6 +102,8 @@ node scripts/table.mjs
 
 `node scripts/table.mjs` also needs a build. It starts the table server on a spare port, opens the board and three phones in separate browsers, and checks joining, setup with pieces started on the phones and placed on the board, rolling from a phone, the trade sheet, ending a turn, a 7 keyed in from physical dice with the thief moved on the board and a face-down card taken, a dropped phone coming back, moving a seat with the rejoin code, a server restart, and the sideways prompt. Its screenshots go to `screenshots/table/`.
 
+`npx tsx scripts/phone-shots.ts` (after a build) screenshots the phone at a phone's size from prepared games: a big hand, the discard sheet after a 7 and the trade sheet, into `screenshots/phone/`.
+
 `npm test` includes bot games: bots play through the real server logic, mixing legal moves with nonsense, and every saved state is checked against the rules (no card made or lost, settlements apart, roads connected, refused moves change nothing), 7s, discards and steals included. It plays 60 games; `SIM_GAMES=1000 npx vitest run server/sim` plays more.
 
 `npm run screenshots` needs a build first. It saves the New game screen, both boards, a mid-game roll, and the thief being moved and blocking a tile at 1920×1080, 1366×768, 2560×1440 and 1024×768 into `screenshots/`, using the installed Microsoft Edge. CI runs the tests and screenshots on every push and uploads the screenshots as a build artifact.

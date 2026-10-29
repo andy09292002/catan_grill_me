@@ -257,12 +257,13 @@ function handView(h: Hand) {
   const n = cards.length;
   const fan = el('div', { class: 'fan', 'aria-label': `${n} cards` });
   if (!n) fan.append(el('p', { class: 'hint empty' }, 'No cards yet'));
-  // Spread sideways as well as round, so each card's name shows; tighter as the hand grows.
-  const step = n > 1 ? Math.min(7, 56 / (n - 1)) : 0;
-  const spread = n > 1 ? Math.min(0.62, 4.2 / (n - 1)) : 0;
+  // Spread sideways as well as round, tighter as the hand grows, but never wider than the space.
+  const step = n > 1 ? Math.min(7, 30 / (n - 1)) : 0;
+  // The outer cards lean out by about a card's width at full tilt, so leave room for that too.
+  const gap = n > 1 ? `min(0.62 * var(--card-w), (100% - 2.2 * var(--card-w)) / ${n - 1})` : '0px';
   cards.forEach((r, i) => {
     const k = i - (n - 1) / 2;
-    fan.append(card(r, { style: `transform:translateX(calc(-50% + ${k * spread} * var(--card-w))) rotate(${k * step}deg);z-index:${i}` }));
+    fan.append(card(r, `left:calc(50% + ${k} * ${gap});transform:translateX(-50%) rotate(${k * step}deg);z-index:${i}`));
   });
   const counts = el(
     'div',
@@ -294,8 +295,8 @@ function offerOverlay(v: PhoneView) {
       'div',
       { class: 'sheet offer' },
       el('h2', {}, `${colorName(v, o.from)} offers a trade`),
-      el('div', { class: 'trade-line' }, el('span', {}, 'You get'), ...costChips(o.give)),
-      el('div', { class: 'trade-line' }, el('span', {}, 'You give'), ...costChips(o.get)),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You get'), ...costChips(o.give)),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You give'), ...costChips(o.get)),
       !canPay && el('p', { class: 'hint' }, 'You don’t have those cards.'),
       el('div', { class: 'row' }, button('Decline', 'secondary', () => act({ type: 'respond', accept: false })), accept),
     ),
@@ -374,7 +375,7 @@ function tradeSheet(v: PhoneView) {
       bankGive = bankGet = null;
     });
     ok.disabled = !bankGive || !bankGet || bankGive === bankGet || me.hand[bankGive] < me.rates[bankGive];
-    body = [el('div', { class: 'trade-line' }, el('span', {}, 'Give'), ...giveRow), el('div', { class: 'trade-line' }, el('span', {}, 'Get 1'), ...getRow), el('div', { class: 'row' }, button('Close', 'secondary', close), ok)];
+    body = [el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'Give'), ...giveRow), el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'Get 1'), ...getRow), el('div', { class: 'row' }, button('Close', 'secondary', close), ok)];
   } else {
     const to = tradeWith;
     const send = button('Send offer', 'primary', () => {
@@ -386,8 +387,8 @@ function tradeSheet(v: PhoneView) {
     });
     send.disabled = !handSize(offerGive) || !handSize(offerGet);
     body = [
-      el('div', { class: 'trade-line' }, el('span', {}, 'You give'), ...RESOURCES.map((r) => stepper(r, offerGive, me.hand[r]))),
-      el('div', { class: 'trade-line' }, el('span', {}, 'You get'), ...RESOURCES.map((r) => stepper(r, offerGet, 9))),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You give'), ...RESOURCES.map((r) => stepper(r, offerGive, me.hand[r]))),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'You get'), ...RESOURCES.map((r) => stepper(r, offerGet, 9))),
       el('div', { class: 'row' }, button('Close', 'secondary', close), send),
     ];
   }
