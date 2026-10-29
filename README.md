@@ -69,6 +69,14 @@ This builds the app and starts the server. It prints two addresses: open the fir
 - If a phone dies, tap that player's badge: the board shows a one-time code that moves the seat to another phone, and the old phone stops working for this game.
 - The server saves the game to `.table/game.json` after every change, so stopping and restarting it carries on where you left off.
 
+**Phones can't connect?** The address in the QR code is the PC's address on your Wi-Fi, so phones on that Wi-Fi should reach it. When they can't, it's almost always Windows Firewall:
+
+1. **Settings → Network & internet → Wi-Fi →** your network **→ Network profile type: Private.** On a *Public* network, Windows blocks phones from connecting.
+2. **Control Panel → Windows Defender Firewall → Allow an app through firewall → Change settings,** find **Node.js JavaScript Runtime** and tick **Private.** If you clicked Cancel on the first-run prompt, Windows saved that as a *block* rule; ticking the box replaces it.
+3. Restart `npm run table` and scan again.
+
+Some routers also keep devices apart ("AP isolation" or a guest network); use the main network, not the guest one.
+
 For now (milestone 6) the phones show only their color and whose turn it is; the cards and actions come with the rules in milestones 7 to 9. Rolling, Next turn and the thief work from the board as in Board only, with the server rolling the dice.
 
 A URL like `?size=30&mode=balancedPlus&seed=12345&players=5&thief=physical` opens a fixed board for testing or sharing without touching the saved game. Modes are `random`, `balanced` and `balancedPlus`.
