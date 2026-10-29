@@ -9,6 +9,10 @@ const EDGE_GAP = 8;
 export interface SeatStats {
   points: number;
   cards: number;
+  devCards: number;
+  knights: number;
+  longestRoad: boolean;
+  largestArmy: boolean;
 }
 
 /** More cards than this and a 7 costs half of them, so the panel warns. */
@@ -34,12 +38,16 @@ export function renderSeatBadges(container: HTMLElement, seats: SeatView[] | nul
         type: 'button',
         class: `seat-badge${s.connected ? '' : ' away'}${over ? ' over' : ''}`,
         style: `transform:translate(-50%,-50%) rotate(${facing}deg);--player:${PLAYER_HEX[s.color]}`,
-        'aria-label': `${PLAYER_NAMES[s.color]}: ${st ? `${st.points} points, ${st.cards} cards, ` : ''}${s.connected ? 'phone connected' : 'no phone'}. Tap to move to another phone`,
+        'aria-label': `${PLAYER_NAMES[s.color]}: ${st ? `${st.points} points, ${st.cards} cards, ${st.devCards} development cards, ` : ''}${s.connected ? 'phone connected' : 'no phone'}. Tap to move to another phone`,
       },
       el('span', { class: 'dot' }),
       el('span', { class: 'name' }, s.connected ? PLAYER_NAMES[s.color] : `${PLAYER_NAMES[s.color]} · no phone`),
       st && el('span', { class: 'stat', title: 'Points' }, el('b', {}, String(st.points)), ' pts'),
       st && el('span', { class: 'stat cards', title: 'Cards in hand' }, el('span', { class: 'card-icon' }), el('b', {}, String(st.cards))),
+      st && st.devCards > 0 && el('span', { class: 'stat dev', title: 'Development cards' }, el('span', { class: 'card-icon dev' }), el('b', {}, String(st.devCards))),
+      st && st.knights > 0 && el('span', { class: 'stat', title: 'Knights played' }, el('b', {}, String(st.knights)), st.knights === 1 ? ' knight' : ' knights'),
+      st?.longestRoad && el('span', { class: 'award', title: 'Longest Road: 2 points' }, 'Longest Road'),
+      st?.largestArmy && el('span', { class: 'award', title: 'Largest Army: 2 points' }, 'Largest Army'),
     );
     badge.addEventListener('click', () => onTap(seat));
     container.append(badge);

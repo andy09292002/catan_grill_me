@@ -2,15 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { createRng, type Rng } from '../src/board/rng';
 import { PLAYER_COLORS } from '../src/game/players';
 import type { BoardView, ClientMessage, PhoneView, ServerMessage } from '../src/net/protocol';
-import { geometryOf, hand, PIECES, piecesLeft, RESOURCES, type Action, type Hand } from '../src/rules/engine';
+import { geometryOf, hand, legalPlaces, PIECES, piecesLeft, RESOURCES, totalPoints, WIN_POINTS, type Action, type Hand } from '../src/rules/engine';
 import { isSavedTable, Lobby, type Conn, type SavedTable } from './lobby';
 
 // Bots play many games through the real server logic, mixing sensible moves with nonsense,
 // and every state the server saves is checked against the rules.
 
 // More games locally with SIM_GAMES=1000 npx vitest run server/sim
-const GAMES = Number(process.env.SIM_GAMES) || 60;
-const TURNS = 60;
+const GAMES = Number(process.env.SIM_GAMES) || 25;
+/** A game that hasn't been won by now is stuck. */
+const MAX_TURNS = 600;
 
 interface Bot extends Conn {
   last?: PhoneView;
@@ -77,6 +78,10 @@ function checkTable(t: SavedTable) {
   });
 }
 
+/** Why games didn't finish, for the report when too many stall. */
+const stalls: string[] = [];
+
+/** Plays one game to the end: someone reaches 10 points. */
 function playGame(seed: number) {
   const rng = createRng(seed);
   const players = 2 + Math.floor(rng() * 3);
@@ -119,7 +124,8 @@ function playGame(seed: number) {
   let turns = 0;
   let steps = 0;
   let sevens = 0;
-  while (turns < TURNS && steps < TURNS * 60) {
+  let cardsPlayed = 0;
+  while (board.board!.rules.winner === null && turns < MAX_TURNS && steps < MAX_TURNS * 60) {
     steps++;
     const view = board.board!;
     const seat = view.game.current;
@@ -170,6 +176,9 @@ function playGame(seed: number) {
         { type: 'offer', to: Math.floor(rng() * 7) - 1, give: randomHand(rng, null), get: randomHand(rng, null) },
         { type: 'respond', accept: true },
         { type: 'moveThief', tile: Math.floor(rng() * 22) - 1 },
+        { type: 'buyCard' },
+        { type: 'playCard', card: pick(rng, ['knight', 'roads', 'plenty', 'monopoly', 'point'] as const) },
+        { type: 'playCard', card: 'plenty', take: [pick(rng, RESOURCES)] },
       ] as Action[]);
       send(anyone, junk);
       continue;
@@ -178,8 +187,24 @@ function playGame(seed: number) {
       if (me.setupNeed) send(phone, { type: 'build', kind: me.setupNeed });
       continue;
     }
+    if (me.freeRoads > 0 && me.can.build.road && rng() < 0.9) {
+      send(phone, { type: 'build', kind: 'road' });
+      continue;
+    }
+    // A development card, sometimes before rolling.
+    const playable = (['knight', 'roads', 'plenty', 'monopoly'] as const).filter((c) => me.can.play[c]);
+    if (playable.length && rng() < 0.3) {
+      const card = pick(rng, playable);
+      cardsPlayed++;
+      send(phone, { type: 'playCard', card, take: [pick(rng, RESOURCES), pick(rng, RESOURCES)], resource: pick(rng, RESOURCES) });
+      continue;
+    }
     if (me.can.roll) {
       send(rng() < 0.5 ? phone : board, rng() < 0.8 ? { type: 'roll' } : { type: 'enterRoll', total: 2 + Math.floor(rng() * 11) });
+      continue;
+    }
+    if (me.can.buyCard && rng() < 0.25) {
+      send(phone, { type: 'buyCard' });
       continue;
     }
     const kinds = (['city', 'settlement', 'road'] as const).filter((k) => me.can.build[k]);
@@ -187,8 +212,11 @@ function playGame(seed: number) {
     if (kinds.length && r < 0.5) send(phone, { type: 'build', kind: pick(rng, kinds) });
     else if (me.can.undo && r < 0.55) send(phone, { type: 'undo' });
     else if (me.can.trade && r < 0.7) {
-      const give = pick(rng, RESOURCES);
-      send(phone, { type: 'bankTrade', give, get: pick(rng, RESOURCES) });
+      // Mostly a sensible trade, the biggest pile for a missing card; sometimes any old one.
+      const most = RESOURCES.reduce((a, b) => (me.hand[b] > me.hand[a] ? b : a));
+      const missing = RESOURCES.filter((x) => me.hand[x] === 0);
+      const sensible = rng() < 0.7 && missing.length;
+      send(phone, { type: 'bankTrade', give: sensible ? most : pick(rng, RESOURCES), get: sensible ? pick(rng, missing) : pick(rng, RESOURCES) });
     } else if (me.can.trade && r < 0.8 && players > 1) {
       const to = (seat + 1 + Math.floor(rng() * (players - 1))) % players;
       send(phone, { type: 'offer', to, give: randomHand(rng, me.hand), get: randomHand(rng, null) });
@@ -199,18 +227,42 @@ function playGame(seed: number) {
   }
   const last = saves.at(-1)!;
   expect(last.rules.phase, 'setup finished').toBe('main');
-  expect(turns, 'the game kept moving').toBe(TURNS);
-  return { last, steals: sevens };
+  const why = () =>
+    `game ${seed}: ${turns} turns, ${steps} steps, points ${last.game.colors.map((_, s) => totalPoints(last.rules, s)).join('/')}, ` +
+    `pieces ${last.game.colors.map((_, s) => JSON.stringify(piecesLeft(last.rules, s))).join(' ')}, deck ${last.rules.deck.length}, ` +
+    `bank ${JSON.stringify(last.rules.bank)}, hands ${JSON.stringify(last.rules.hands)}, legal ${last.game.colors.map((_, s) => legalPlaces({ game: last.game, rules: last.rules }, s, 'settlement').length).join('/')}, ` +
+    `robber ${JSON.stringify(last.rules.robber)}, pending ${JSON.stringify(last.rules.pending)}, log ${last.rules.log.slice(0, 4).map((l) => l.text).join(' | ')}`;
+  if (last.rules.winner === null) {
+    // Random bots can starve: say nobody builds next to brick and they never save four of a
+    // kind for the bank. Such games may stall, but only a few; every move was still checked.
+    stalls.push(why());
+    return { last, steals: sevens, turns, cardsPlayed, won: false };
+  }
+  // The winner really has 10, counting secret points, and won on their own turn.
+  const w = last.rules.winner!;
+  assert(totalPoints(last.rules, w) >= WIN_POINTS && last.game.current === w, 'won with 10 on their own turn');
+  // Nothing moves after the end.
+  const errors = phones[w].errors;
+  send(phones[w], { type: 'endTurn' });
+  assert(phones[w].errors === errors + 1, 'the finished game refuses moves');
+  return { last, steals: sevens, turns, cardsPlayed, won: true };
 }
 
 describe('simulated games', () => {
-  it(`${GAMES} bot games of ${TURNS} turns keep to the rules`, { timeout: GAMES * 1000 }, () => {
+  it(`${GAMES} bot games played to the end keep to the rules`, { timeout: GAMES * 2000 }, () => {
     let built = 0;
     let traded = 0;
     let steals = 0;
+    let played = 0;
+    let wins = 0;
+    const awards = { road: 0, army: 0 };
     for (let g = 1; g <= GAMES; g++) {
-      const { last: t, steals: s } = playGame(g * 7919);
+      const { last: t, steals: s, cardsPlayed, won } = playGame(g * 7919);
+      if (won) wins++;
       steals += s;
+      played += cardsPlayed;
+      if (t.rules.longestRoad !== null) awards.road++;
+      if (t.rules.largestArmy !== null) awards.army++;
       built += t.rules.buildings.filter(Boolean).length;
       traded += t.rules.log.filter((l) => l.text.includes('traded')).length;
     }
@@ -218,5 +270,9 @@ describe('simulated games', () => {
     expect(built).toBeGreaterThan(GAMES * 5);
     expect(traded).toBeGreaterThan(0);
     expect(steals).toBeGreaterThan(GAMES);
+    expect(played).toBeGreaterThan(GAMES);
+    expect(wins, `nearly every game ends with a winner; stalled: ${stalls.join(' || ')}`).toBeGreaterThanOrEqual(GAMES * 0.9);
+    expect(awards.road).toBeGreaterThan(0);
+    expect(awards.army).toBeGreaterThan(0);
   });
 });

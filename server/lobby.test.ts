@@ -286,6 +286,38 @@ describe('playing', () => {
   });
 });
 
+describe('development cards and the end', () => {
+  it('never sends the deck, and shows card types only to their owner', () => {
+    const t = fullTable();
+    playSetup(t);
+    const board = JSON.stringify(t.board.last('board'));
+    expect(board).not.toMatch(/"deck"|"knight"|"point"|"monopoly"/);
+    expect(t.board.last('board')!.view.rules.deckLeft).toBe(25);
+    for (const p of t.phones) expect(JSON.stringify(p.last('phone'))).not.toMatch(/"deck"/);
+  });
+
+  it('a rematch keeps every phone in its seat and starts setup at once', () => {
+    const t = fullTable();
+    playSetup(t);
+    const id = t.board.last('board')!.view.id;
+    t.say(t.board, { type: 'create', options: { ...OPTIONS, seed: 7 }, rematch: true });
+    const view = t.board.last('board')!.view;
+    expect(view.id).toBe(id);
+    expect(view.started).toBe(true);
+    expect(view.rules.phase).toBe('setup');
+    expect(t.phones.map((p) => p.seat)).toEqual([0, 1, 2]);
+    expect(t.phones[0].last('phone')!.view.me).not.toBeNull();
+  });
+
+  it('a rematch with different players goes back to joining', () => {
+    const t = fullTable();
+    playSetup(t);
+    t.say(t.board, { type: 'create', options: { ...OPTIONS, colors: ['red', 'blue'] }, rematch: true });
+    expect(t.board.last('board')!.view.started).toBe(false);
+    expect(t.phones[0].seat).toBeNull();
+  });
+});
+
 describe('saving', () => {
   it('saves after every change and carries on from the save', () => {
     const t = fullTable();

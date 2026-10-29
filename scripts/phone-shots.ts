@@ -1,6 +1,6 @@
-// Screenshots of the phone's sheets at a phone's size, from a prepared game: the discard after
-// a 7 with a big hand, the player-trade sheet, and the face-down steal. Starts its own table
-// server from a save file, so no clicking through setup.
+// Screenshots of the phone's sheets at a phone's size, from prepared games: the discard after
+// a 7 with a big hand, the player-trade sheet, development cards, and the end of a game on the
+// phone and the board. Starts its own table server from a save file, so no clicking through setup.
 // Needs a build first (`npm run build`). Run: npx tsx scripts/phone-shots.ts
 
 import { chromium } from '@playwright/test';
@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SavedTable } from '../server/lobby';
 import { createGame } from '../src/game/state';
-import { apply, hand, legalPlaces, RESOURCES, startTable, type Action, type Hand, type Table } from '../src/rules/engine';
+import { apply, DEV_COST, hand, legalPlaces, RESOURCES, startTable, type Action, type DevCard, type Hand, type Table } from '../src/rules/engine';
 
 const PORT = 5198;
 const out = 'screenshots/phone';
@@ -20,6 +20,12 @@ function act(t: Table, seat: number, a: Action): Table {
   const r = apply(t, seat, a, () => [3, 4]);
   if (!r.ok) throw new Error(`${a.type}: ${r.reason}`);
   return r.table;
+}
+
+/** Sets one seat's hand, taking the difference from the bank. */
+function withCards(table: Table, seat: number, h: Partial<Hand>): Table {
+  const hands = table.rules.hands.map((x, s) => (s === seat ? hand(h) : x));
+  return withHands(table, hands);
 }
 
 /** Sets hands, keeping the bank's totals right. */
@@ -42,20 +48,38 @@ while (t.rules.phase === 'setup') {
 t = withHands(t, [{ wood: 3, brick: 2, wool: 1, grain: 4, ore: 2 }, { wood: 3, grain: 3, ore: 2 }, { wool: 2 }]);
 const keys = ['key-red', 'key-blue', 'key-white'];
 const save = (table: Table) => {
-  const saved: SavedTable = { version: 2, id: 'shots', started: true, game: table.game, rules: table.rules, keys };
+  const saved: SavedTable = { version: 3, id: 'shots', started: true, game: table.game, rules: table.rules, keys };
   writeFileSync(join(saveDir, 'game.json'), JSON.stringify(saved));
 };
 
 const saveDir = mkdtempSync(join(tmpdir(), 'hex-phone-'));
 const browser = await chromium.launch({ channel: process.env.SCREENSHOT_BROWSER === 'chromium' ? undefined : 'msedge' });
 
-async function withServer(table: Table, shoot: (open: (seat: number) => Promise<import('@playwright/test').Page>) => Promise<void>) {
+type Open = (seat: number | 'board') => Promise<import('@playwright/test').Page>;
+
+/** Hands `seat` development cards, bought on `bought`, out of the deck. */
+function withDev(table: Table, seat: number, cards: DevCard[], bought = 0): Table {
+  const deck = table.rules.deck.slice();
+  for (const c of cards) deck.splice(deck.lastIndexOf(c), 1);
+  const devCards = table.rules.devCards.slice();
+  devCards[seat] = [...devCards[seat], ...cards.map((card) => ({ card, bought }))];
+  return { ...table, rules: { ...table.rules, deck, devCards } };
+}
+
+async function withServer(table: Table, shoot: (open: Open) => Promise<void>) {
   save(table);
   const contexts: import('@playwright/test').BrowserContext[] = [];
   const server = spawn(process.execPath, ['--import', 'tsx', 'server/table.ts'], { env: { ...process.env, PORT: String(PORT), HEX_BOARD_SAVE: saveDir }, stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise<void>((resolve) => server.stdout.on('data', (d) => String(d).includes('table is running') && resolve()));
   try {
     await shoot(async (seat) => {
+      if (seat === 'board') {
+        const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+        contexts.push(ctx);
+        const page = await ctx.newPage();
+        await page.goto(`http://localhost:${PORT}/`);
+        return page;
+      }
       const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
       contexts.push(ctx);
       await ctx.addInitScript((k) => localStorage.setItem('hex-board/seat', JSON.stringify({ tableId: 'shots', key: k })), keys[seat]);
@@ -92,6 +116,43 @@ try {
     await red.getByRole('button', { name: /Blue/ }).click();
     await red.getByText('Send offer').waitFor();
     await red.screenshot({ path: `${out}/trade-red.png` });
+  });
+  // Development cards: one of each kind, the monopoly bought this turn.
+  const later = { ...t, game: { ...t.game, turn: 3 } };
+  const carded = withDev(withDev(later, 0, ['knight', 'plenty', 'point']), 0, ['monopoly'], 3);
+  await withServer(act(carded, 0, { type: 'enterRoll', total: 5 }), async (open) => {
+    const red = await open(0);
+    await red.getByRole('button', { name: 'Cards (4)' }).click();
+    await red.getByText('Your development cards').waitFor();
+    await red.screenshot({ path: `${out}/cards-red.png` });
+    // Year of plenty: two ore.
+    await red.locator('.dev-list li', { hasText: 'Year of plenty' }).getByRole('button', { name: 'Play' }).click();
+    await red.locator('.sheet .res', { hasText: 'Ore' }).click();
+    await red.locator('.sheet .res', { hasText: 'Ore' }).click();
+    await red.screenshot({ path: `${out}/plenty-red.png` });
+    await red.getByRole('button', { name: 'Take them' }).click();
+    await red.getByText('Ore 4').waitFor();
+  });
+
+  // One point short (a city, a settlement, Largest Army and 4 victory point cards), with the
+  // last victory point card on top of the deck: buying it wins.
+  let near = withDev(withCards(later, 0, DEV_COST), 0, ['point', 'point', 'point', 'point']);
+  const city = near.rules.buildings.findIndex((b) => b?.seat === 0);
+  const buildings = near.rules.buildings.map((b, i) => (i === city ? { seat: 0, kind: 'city' as const } : b));
+  const deck = [...near.rules.deck.filter((c) => c !== 'point'), 'point' as const];
+  near = { ...near, rules: { ...near.rules, buildings, deck, knights: [3, 0, 0], largestArmy: 0 } };
+  await withServer(act(near, 0, { type: 'enterRoll', total: 5 }), async (open) => {
+    const red = await open(0);
+    const board = await open('board');
+    await board.locator('.seat-badge').first().waitFor();
+    await red.locator('.build', { hasText: 'Card' }).click();
+    await red.getByText('You win!').waitFor();
+    await red.screenshot({ path: `${out}/win-red.png` });
+    const blue = await open(1);
+    await blue.getByText('Red wins!').waitFor();
+    await blue.screenshot({ path: `${out}/win-blue.png` });
+    await board.getByText('Red wins!').waitFor();
+    await board.screenshot({ path: `${out}/win-board.png` });
   });
   console.log(`Screenshots saved to ${out}/`);
 } finally {

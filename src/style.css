@@ -702,3 +702,53 @@ body {
 .robber-note[hidden] {
   display: none;
 }
+
+/* Board + phones: development cards and awards on the panels, and the end screen */
+
+.seat-badge .card-icon.dev {
+  border-style: dashed;
+}
+.seat-badge .award {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #1a1406;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.finish h2 {
+  font-size: clamp(26px, 4vmin, 38px);
+}
+.finish-scores {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.finish-scores li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--panel-edge);
+}
+.finish-scores li.winner {
+  color: var(--accent);
+}
+.finish-scores .dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.35);
+}
+.finish-scores .name {
+  font-weight: 800;
+}
+.finish-scores .extras {
+  flex: 1;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+.finish-scores .pts {
+  font-size: 26px;
+}

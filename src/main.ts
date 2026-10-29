@@ -23,6 +23,7 @@ import { geometryOf, type BuildKind } from './rules/engine';
 import { showBanner, TUMBLE_MS, type BannerHandle } from './ui/banner';
 import { confirmDialog } from './ui/confirm';
 import { openPad } from './ui/pad';
+import { showFinish, type FinishHandle } from './ui/finish';
 import { showLobby, showRejoin, type LobbyHandle } from './ui/lobby';
 import { placeAtEdge, renderSeatBadges } from './ui/seats';
 import { FIRST_LAUNCH_DEFAULTS, openSetup, type PlayMode } from './ui/setup';
@@ -57,6 +58,7 @@ let table: TableSocket | null = null;
 /** The table server's game while playing Board + phones; null in Board only. The server saves it, not this page. */
 let remote: BoardView | null = null;
 let lobby: LobbyHandle | null = null;
+let finishScreen: FinishHandle | null = null;
 /** Whether the first word from the table server has arrived, deciding which game to show. */
 let decided = false;
 let lastPlay: PlayMode = 'board';
@@ -387,17 +389,20 @@ function turnTowards(seat: number, players: number) {
   angleStart = performance.now();
 }
 
-async function newGame(firstLaunch = false) {
+/** `rematch` keeps every phone in its seat when the players are the same. */
+async function newGame(firstLaunch = false, rematch = false) {
   const defaults = game
     ? { colors: game.colors, size: game.board.size, mode: game.board.mode, thiefStyle: game.thiefStyle }
     : FIRST_LAUNCH_DEFAULTS;
   const result = await openSetup(defaults, !firstLaunch, { level: prefs.animation, onChange: setAnimation }, { available: !!table, play: lastPlay });
   if (!result) return;
-  if (game && !(await confirmDialog('Replace the current board?', 'The board, turn and roll history of the game in progress will be lost.', 'Replace', 'Keep current board'))) return;
+  // A finished game needs no asking.
+  const over = remote?.rules.winner !== null && remote?.rules.winner !== undefined;
+  if (game && !over && !(await confirmDialog('Replace the current board?', 'The board, turn and roll history of the game in progress will be lost.', 'Replace', 'Keep current board'))) return;
   lastPlay = result.play;
   if (result.play === 'phones') {
     // The table server makes the game and sends it back; phones join from the lobby.
-    table!.send({ type: 'create', options: result.options });
+    table!.send({ type: 'create', options: result.options, rematch });
     return;
   }
   if (remote) leaveTable();
@@ -472,7 +477,31 @@ function onServer(msg: ServerMessage) {
     lobby = null;
   }
   syncRobber();
+  syncFinish();
   renderBadges();
+}
+
+/** Shows the end screen once someone has won, and takes it away when a new game starts. */
+function syncFinish() {
+  const won = remote?.started && remote.rules.winner !== null;
+  if (won && !finishScreen) {
+    finishScreen = showFinish(remote!, {
+      onRematch: () => {
+        closeFinish();
+        // If the New game screen is cancelled, the end screen comes back.
+        void newGame(false, true).then(syncFinish);
+      },
+      onNewGame: () => {
+        closeFinish();
+        void newGame().then(syncFinish);
+      },
+    });
+  } else if (!won) closeFinish();
+}
+
+function closeFinish() {
+  finishScreen?.close();
+  finishScreen = null;
 }
 
 /**
@@ -502,7 +531,17 @@ function syncRobber() {
 }
 
 function renderBadges() {
-  const stats = remote ? remote.seats.map((_, s) => ({ points: remote!.rules.points[s], cards: remote!.rules.cards[s] })) : [];
+  const r = remote?.rules;
+  const stats = r
+    ? remote!.seats.map((_, s) => ({
+        points: r.points[s],
+        cards: r.cards[s],
+        devCards: r.devCards[s],
+        knights: r.knights[s],
+        longestRoad: r.longestRoad === s,
+        largestArmy: r.largestArmy === s,
+      }))
+    : [];
   renderSeatBadges(document.querySelector('#seat-badges')!, remote?.started ? remote.seats : null, stats, (seat) => table?.send({ type: 'rejoinCode', seat }));
   updateBuildConfirm();
 }
