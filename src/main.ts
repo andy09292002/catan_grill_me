@@ -21,7 +21,11 @@ import { FrameBudget } from './render/perf';
 import { showBanner, TUMBLE_MS, type BannerHandle } from './ui/banner';
 import { confirmDialog } from './ui/confirm';
 import { openPad } from './ui/pad';
-import { FIRST_LAUNCH_DEFAULTS, openSetup } from './ui/setup';
+import { showLobby, showRejoin, type LobbyHandle } from './ui/lobby';
+import { renderSeatBadges } from './ui/seats';
+import { FIRST_LAUNCH_DEFAULTS, openSetup, type PlayMode } from './ui/setup';
+import type { BoardView, ServerMessage } from './net/protocol';
+import { openSocket, tableAvailable, type TableSocket } from './net/socket';
 import { registerSW } from 'virtual:pwa-register';
 
 // Caches the app for offline use and picks up new versions on the next launch.
@@ -44,6 +48,15 @@ let game: GameState | null = null;
 let board: Board | null = null;
 /** Whether the game came from the URL (screenshots, shared boards) and so is never saved. */
 let ephemeral = false;
+
+/** The connection to the table server, when this page was opened from it. */
+let table: TableSocket | null = null;
+/** The table server's game while playing Board + phones; null in Board only. The server saves it, not this page. */
+let remote: BoardView | null = null;
+let lobby: LobbyHandle | null = null;
+/** Whether the first word from the table server has arrived, deciding which game to show. */
+let decided = false;
+let lastPlay: PlayMode = 'board';
 
 // Text angle keeps growing turn after turn so it always turns forwards, never back the long way.
 let angle = 0;
@@ -91,7 +104,7 @@ function setGame(next: GameState, opts: { resetAngle?: boolean } = {}) {
     angle = angleFrom = angleTo = currentAngle(next);
     angleStart = -Infinity;
   }
-  if (!ephemeral) saveGame(next);
+  if (!ephemeral && !remote) saveGame(next);
   updateControls();
   requestRender();
 }
@@ -234,14 +247,25 @@ function onBoardTap(e: PointerEvent) {
   const fit = fitBoard(board.layout, window.innerWidth, window.innerHeight);
   const tile = pickTile(board.layout, fit, { x: e.clientX, y: e.clientY });
   if (tile === null || tile === game.thiefTile) return;
-  setGame(moveThief(game, tile));
+  if (remote) table!.send({ type: 'moveThief', tile });
+  else setGame(moveThief(game, tile));
   stopChoosingThief();
 }
 
 function applyRoll(roll: Roll) {
   if (!game) return;
+  if (remote) {
+    table!.send(roll.dice ? { type: 'roll' } : { type: 'enterRoll', total: roll.total });
+    return;
+  }
   stopChoosingThief();
   setGame(recordRoll(game, roll));
+  showRoll(roll);
+}
+
+/** The banner, dice and flashing tiles for a roll that's already in the game. */
+function showRoll(roll: Roll) {
+  if (!game) return;
   if (roll.total === THIEF_NUMBER && game.thiefStyle === 'onscreen') startChoosingThief(roll);
   else showBanner(bannerPlacement(), roll);
   if (roll.dice) {
@@ -276,20 +300,105 @@ async function enterRoll() {
 function advanceTurn() {
   if (!game) return;
   stopChoosingThief();
-  angleFrom = angle;
-  angleTo += 360 / game.colors.length;
-  angleStart = performance.now();
+  if (remote) {
+    table!.send({ type: 'nextTurn' });
+    return;
+  }
+  turnTowardsNext(game.colors.length);
   setGame(nextTurn(game));
+}
+
+function turnTowardsNext(players: number) {
+  angleFrom = angle;
+  angleTo += 360 / players;
+  angleStart = performance.now();
 }
 
 async function newGame(firstLaunch = false) {
   const defaults = game
     ? { colors: game.colors, size: game.board.size, mode: game.board.mode, thiefStyle: game.thiefStyle }
     : FIRST_LAUNCH_DEFAULTS;
-  const options = await openSetup(defaults, !firstLaunch, { level: prefs.animation, onChange: setAnimation });
-  if (!options) return;
+  const result = await openSetup(defaults, !firstLaunch, { level: prefs.animation, onChange: setAnimation }, { available: !!table, play: lastPlay });
+  if (!result) return;
   if (game && !(await confirmDialog('Replace the current board?', 'The board, turn and roll history of the game in progress will be lost.', 'Replace', 'Keep current board'))) return;
-  startGame(options);
+  lastPlay = result.play;
+  if (result.play === 'phones') {
+    // The table server makes the game and sends it back; phones join from the lobby.
+    table!.send({ type: 'create', options: result.options });
+    return;
+  }
+  if (remote) leaveTable();
+  startGame(result.options);
+}
+
+/** Back to Board only: the table server forgets its game and the phones are let go. */
+function leaveTable() {
+  remote = null;
+  lobby?.close();
+  lobby = null;
+  table?.send({ type: 'close' });
+  renderBadges();
+}
+
+/** Shows the Board only game saved on this PC, or the New game screen if there is none. */
+function startLocal() {
+  const saved = loadGame();
+  if (saved) {
+    game = null;
+    setGame(saved, { resetAngle: true });
+  } else void newGame(true);
+}
+
+function onServer(msg: ServerMessage) {
+  if (msg.type === 'noTable') {
+    lobby?.close();
+    lobby = null;
+    if (remote || !decided) {
+      decided = true;
+      remote = null;
+      renderBadges();
+      startLocal();
+    }
+    return;
+  }
+  if (msg.type === 'rejoinCode') {
+    if (remote) void showRejoin(remote.seats[msg.seat].color, msg.url);
+    return;
+  }
+  if (msg.type !== 'board') return;
+
+  decided = true;
+  const { view, event } = msg;
+  const fresh = !remote || remote.id !== view.id;
+  remote = view;
+  if (fresh) {
+    stopChoosingThief();
+    game = null;
+    setGame(view.game, { resetAngle: true });
+  } else if (event?.kind === 'roll') {
+    stopChoosingThief();
+    setGame(view.game);
+    showRoll(event.roll);
+  } else if (event?.kind === 'turn') {
+    stopChoosingThief();
+    turnTowardsNext(view.game.colors.length);
+    setGame(view.game);
+  } else {
+    setGame(view.game);
+  }
+
+  if (!view.started) {
+    if (lobby) lobby.update(view);
+    else lobby = showLobby(view, { onStart: () => table?.send({ type: 'start' }), onCancel: () => table?.send({ type: 'close' }) });
+  } else if (lobby) {
+    lobby.close();
+    lobby = null;
+  }
+  renderBadges();
+}
+
+function renderBadges() {
+  renderSeatBadges(document.querySelector('#seat-badges')!, remote?.started ? remote.seats : null, (seat) => table?.send({ type: 'rejoinCode', seat }));
 }
 
 function startGame(options: NewGameOptions) {
@@ -335,6 +444,7 @@ declare global {
   interface Window {
     hexBoard?: {
       readonly game: GameState | null;
+      readonly remote: BoardView | null;
       readonly stats: { level: AnimationLevel; slowDevice: boolean; averageDrawMs: number };
     };
   }
@@ -343,19 +453,37 @@ window.hexBoard = {
   get game() {
     return game;
   },
+  get remote() {
+    return remote;
+  },
   get stats() {
     const averageDrawMs = drawTimes.length ? drawTimes.reduce((a, b) => a + b, 0) / drawTimes.length : 0;
     return { level: animationLevel(), slowDevice, averageDrawMs };
   },
 };
-window.addEventListener('resize', requestRender);
+window.addEventListener('resize', () => {
+  requestRender();
+  renderBadges();
+});
 
 const fromUrl = gameFromUrl();
 if (fromUrl) {
   ephemeral = true;
   setGame(fromUrl, { resetAngle: true });
-} else {
-  const saved = loadGame();
-  if (saved) setGame(saved, { resetAngle: true });
-  else void newGame(true);
+} else void boot();
+
+async function boot() {
+  if (!(await tableAvailable())) {
+    startLocal();
+    return;
+  }
+  table = openSocket(() => ({ type: 'hello', role: 'board' }), onServer, (connected) => {
+    if (!connected && remote) showToast('Lost the table server. Reconnecting…');
+  });
+  // If the server doesn't answer, play Board only rather than wait on a blank screen.
+  window.setTimeout(() => {
+    if (decided) return;
+    decided = true;
+    startLocal();
+  }, 3000);
 }

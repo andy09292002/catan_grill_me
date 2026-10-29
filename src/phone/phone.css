@@ -1,0 +1,121 @@
+:root {
+  --bg: #0a1626;
+  --panel-edge: rgba(143, 176, 208, 0.35);
+  --ink: #f4e7c5;
+  --ink-muted: #8fb0d0;
+  --player: #8fb0d0;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  overflow: hidden;
+}
+
+#phone {
+  height: 100%;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+}
+
+.screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+}
+.screen h1 {
+  margin: 0;
+  font-size: clamp(22px, 7vh, 40px);
+}
+.hint {
+  margin: 0;
+  max-width: 40em;
+  color: var(--ink-muted);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.picks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.pick {
+  min-width: 120px;
+  min-height: 64px;
+  padding: 0 20px;
+  border-radius: 16px;
+  border: 3px solid rgba(0, 0, 0, 0.35);
+  background: var(--player);
+  color: #1a1406;
+  font: inherit;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.seated {
+  border-radius: 24px;
+  border: 4px solid var(--player);
+  background: color-mix(in srgb, var(--player) 14%, transparent);
+}
+.seated.my-turn {
+  background: color-mix(in srgb, var(--player) 32%, transparent);
+}
+.me {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 900;
+}
+.me .dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--player);
+  border: 2px solid rgba(0, 0, 0, 0.35);
+}
+
+/* The phone is held sideways, like a hand of cards. */
+.turn-sideways {
+  display: none;
+}
+@media (orientation: portrait) {
+  .turn-sideways {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: var(--bg);
+    font-size: 20px;
+    font-weight: 800;
+  }
+  .turn-sideways svg {
+    width: 96px;
+    height: 96px;
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}

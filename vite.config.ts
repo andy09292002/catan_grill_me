@@ -4,6 +4,10 @@ import { defineConfig } from 'vitest/config';
 // GitHub Pages serves the app from /<repo>/, so built asset paths are relative.
 export default defineConfig({
   base: './',
+  build: {
+    // The board, plus the page phones open in Board + phones games.
+    rollupOptions: { input: { main: 'index.html', phone: 'phone.html' } },
+  },
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
@@ -31,6 +35,6 @@ export default defineConfig({
     }),
   ],
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'server/**/*.test.ts'],
   },
 });

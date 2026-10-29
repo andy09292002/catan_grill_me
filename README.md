@@ -13,6 +13,13 @@ The full design and every decision behind it are in [grillMe.md](grillMe.md).
 | 3 | Game flow: New game screen, dice, turns, text rotation, saving | Done |
 | 4 | Thief | Done |
 | 5 | Animation | Done |
+| 6 | Board + phones: local table server, joining by QR code, seat keys and rejoin | In review |
+| 7 | Board + phones: rules engine, building, trading, the phone hand | Planned |
+| 8 | Board + phones: the 7, discards, the thief and face-down steals | Planned |
+| 9 | Board + phones: development cards, Largest Army, Longest Road, winning | Planned |
+| 10 | Board + phones: 5–6 players, special build phase, a double-click exe | Planned |
+
+The Board + phones design is recorded in `grillMe.md` (session 2).
 
 ## Install it
 
@@ -46,6 +53,24 @@ Open the printed URL, drag the browser window onto the touch monitor and press F
 - The game saves after every change and comes back after a refresh, a restart or closing the app.
 - On a PC keyboard, **R** rolls and **N** passes the turn.
 
+## Board + phones
+
+In this mode each player's phone holds their hidden cards, and the PC runs the game. It needs the table server running on the PC; the GitHub Pages site can only play Board only.
+
+```bash
+npm run table
+```
+
+This builds the app and starts the server. It prints two addresses: open the first (`http://localhost:5180/`) on the PC for the board, and phones join at the second, which the board also shows as a QR code. Phones must be on the same Wi-Fi as the PC; no internet is needed. The first time, Windows asks whether to let Node.js through the firewall: allow it on **private networks**, or phones can't connect.
+
+- On the New game screen, pick **Mode: Board + phones**, then the players and board as usual, and **Start game**.
+- Each player scans the QR code and taps a free color. **Start game** appears once every seat has a phone.
+- A badge at each player's edge shows whether their phone is connected. A phone that sleeps or closes the page goes back to its seat when reopened.
+- If a phone dies, tap that player's badge: the board shows a one-time code that moves the seat to another phone, and the old phone stops working for this game.
+- The server saves the game to `.table/game.json` after every change, so stopping and restarting it carries on where you left off.
+
+For now (milestone 6) the phones show only their color and whose turn it is; the cards and actions come with the rules in milestones 7 to 9. Rolling, Next turn and the thief work from the board as in Board only, with the server rolling the dice.
+
 A URL like `?size=30&mode=balancedPlus&seed=12345&players=5&thief=physical` opens a fixed board for testing or sharing without touching the saved game. Modes are `random`, `balanced` and `balancedPlus`.
 
 ## Check it
@@ -54,7 +79,10 @@ A URL like `?size=30&mode=balancedPlus&seed=12345&players=5&thief=physical` open
 npm test
 npm run build
 npm run screenshots
+node scripts/table.mjs
 ```
+
+`node scripts/table.mjs` also needs a build. It starts the table server on a spare port, opens the board and three phones in separate browsers, and checks joining, turns, a dropped phone coming back, moving a seat with the rejoin code, a server restart, and the sideways prompt. Its screenshots go to `screenshots/table/`.
 
 `npm run screenshots` needs a build first. It saves the New game screen, both boards, a mid-game roll, and the thief being moved and blocking a tile at 1920×1080, 1366×768, 2560×1440 and 1024×768 into `screenshots/`, using the installed Microsoft Edge. CI runs the tests and screenshots on every push and uploads the screenshots as a build artifact.
 
@@ -69,9 +97,14 @@ The app icons in `public/` are rendered from `public/favicon.svg` with `node scr
 - `src/board/` – board geometry, random generation and its tests
 - `src/game/` – players and seats, dice, turns, the thief, saving, the animation preference, and their tests
 - `src/render/` – fitting the board to the screen, drawing it on a canvas, the animated terrain art and the frame-time watcher
-- `src/ui/` – New game screen, confirmation, number pad and roll banner
-- `src/main.ts` – app controller: corner controls, animation and saving
+- `src/ui/` – New game screen, confirmation, number pad, roll banner, the joining screen and seat badges
+- `src/net/` – messages between the table server, the board and the phones, and the reconnecting socket
+- `src/phone/` – the phone page for Board + phones
+- `src/main.ts` – app controller: corner controls, animation and saving, and the board's side of Board + phones
+- `server/` – the table server (`table.ts`) and the seats and game it runs (`lobby.ts`), with tests
+- `phone.html` – the page phones open
 - `public/` – app icons
 - `scripts/screenshots.mjs` – headless screenshots at several screen sizes
 - `scripts/perf.mjs` – frame draw times at each animation level
+- `scripts/table.mjs` – end-to-end check of a board with three phones
 - `.github/workflows/` – CI on every push, and the GitHub Pages deploy on `main`
