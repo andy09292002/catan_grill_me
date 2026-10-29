@@ -4,6 +4,7 @@
 
 import type { PlayerColor } from '../game/players';
 import type { GameState, NewGameOptions, Roll } from '../game/state';
+import type { Action, BuildKind, Building, Hand, LogEntry, Resource, RulesState, TradeOffer } from '../rules/engine';
 
 export const TABLE_PORT = 5180;
 export const SOCKET_PATH = '/ws';
@@ -23,16 +24,53 @@ export type TableEvent =
   | { kind: 'seats' }
   | { kind: 'roll'; roll: Roll }
   | { kind: 'turn' }
-  | { kind: 'thief' };
+  | { kind: 'thief' }
+  | { kind: 'update' };
+
+/** The rules state as everyone may see it: pieces and card counts, never which cards. */
+export interface PublicRules {
+  phase: RulesState['phase'];
+  buildings: (Building | null)[];
+  roads: (number | null)[];
+  cards: number[];
+  points: number[];
+  rolled: boolean;
+  /** A build waiting on the board: where it may go and the spot tapped so far. */
+  pending: { seat: number; kind: BuildKind; legal: number[]; at: number | null } | null;
+}
 
 export interface BoardView {
   id: string;
   /** False while phones are still joining. */
   started: boolean;
   game: GameState;
+  rules: PublicRules;
   seats: SeatView[];
   /** The address phones open, also shown as a QR code. */
   joinUrl: string;
+}
+
+/** What the phone's player can do right now; the server checks again when they do it. */
+export interface PhoneCan {
+  roll: boolean;
+  build: Record<BuildKind, boolean>;
+  cancel: boolean;
+  undo: boolean;
+  trade: boolean;
+  endTurn: boolean;
+}
+
+export interface PhoneMe {
+  hand: Hand;
+  pieces: Record<BuildKind, number>;
+  points: number;
+  /** Cards needed per card from the bank, for each card given. */
+  rates: Record<Resource, number>;
+  /** What to place during setup, when it's this player's step. */
+  setupNeed: 'settlement' | 'road' | null;
+  /** The piece this player is placing on the board. */
+  placing: BuildKind | null;
+  can: PhoneCan;
 }
 
 export interface PhoneView {
@@ -42,6 +80,13 @@ export interface PhoneView {
   current: number;
   /** This phone's seat, or null until it claims one. */
   you: number | null;
+  phase: RulesState['phase'];
+  lastRoll: Roll | null;
+  players: { cards: number; points: number }[];
+  me: PhoneMe | null;
+  /** A trade offer this phone made or was sent. */
+  offer: TradeOffer | null;
+  log: LogEntry[];
 }
 
 export type ClientMessage =
@@ -53,11 +98,9 @@ export type ClientMessage =
   | { type: 'create'; options: NewGameOptions }
   | { type: 'close' }
   | { type: 'start' }
-  | { type: 'roll' }
-  | { type: 'enterRoll'; total: number }
-  | { type: 'nextTurn' }
-  | { type: 'moveThief'; tile: number }
-  | { type: 'rejoinCode'; seat: number };
+  | { type: 'rejoinCode'; seat: number }
+  // Either: a move in the game. The board acts for the current player.
+  | { type: 'act'; action: Action };
 
 export type ServerMessage =
   | { type: 'noTable' }

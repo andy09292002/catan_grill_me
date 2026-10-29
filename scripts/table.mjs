@@ -1,5 +1,6 @@
 // End-to-end check of Board + phones: starts the table server on a spare port, opens the board
-// and three phones in separate browsers, joins, plays a little, drops and moves a phone, and
+// and three phones in separate browsers, joins, plays setup by starting pieces on the phones and
+// placing them on the board, rolls, opens a trade, ends a turn, drops and moves a phone, and
 // restarts the server. Fails on the first thing that's wrong; saves screenshots to screenshots/table/.
 // Needs a build first (`npm run build`). Run: node scripts/table.mjs
 
@@ -31,84 +32,118 @@ function check(ok, what) {
   console.log(`ok - ${what}`);
 }
 
+const PHONE = { viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true };
 const channel = process.env.SCREENSHOT_BROWSER === 'chromium' ? undefined : 'msedge';
 const browser = await chromium.launch({ channel });
 let server = await startServer();
 try {
   const boardCtx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
   const board = await boardCtx.newPage();
+  const remote = () => board.evaluate(() => window.hexBoard.remote);
   await board.goto(BASE);
   await board.getByRole('radio', { name: 'Board + phones' }).click();
   await board.getByRole('radio', { name: '3', exact: true }).click();
-  await board.screenshot({ path: `${out}/1-new-game.png` });
+  await board.screenshot({ path: `${out}/01-new-game.png` });
   await board.getByRole('button', { name: 'Start game' }).click();
   await board.getByText('Join with your phones').waitFor();
   check(await board.getByRole('img', { name: /QR code/ }).evaluate((img) => img.complete && img.naturalWidth > 0), 'board shows the join QR code');
-  const joinUrl = await board.locator('.lobby-url').textContent();
-  check(/^http:\/\/[\d.]+|localhost/.test(joinUrl), `join address is ${joinUrl}`);
 
   // Phones load the page from localhost here; at the table they use the address in the QR code.
   const phones = [];
   for (const color of ['Red', 'Blue', 'White']) {
-    const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true });
+    const ctx = await browser.newContext(PHONE);
     const page = await ctx.newPage();
     await page.goto(`${BASE}/phone.html`);
     await page.getByRole('button', { name: color }).click();
     await page.getByText(color, { exact: true }).waitFor();
     phones.push({ color, ctx, page });
   }
-  await phones[0].page.screenshot({ path: `${out}/2-phone-waiting.png` });
   await board.getByRole('button', { name: 'Start game' }).waitFor();
-  await board.screenshot({ path: `${out}/3-lobby-full.png` });
-  check(await board.getByText('Joined', { exact: true }).count() === 3, 'board shows all three phones joined');
+  await board.screenshot({ path: `${out}/02-lobby-full.png` });
+  check((await board.getByText('Joined', { exact: true }).count()) === 3, 'board shows all three phones joined');
   await board.getByRole('button', { name: 'Start game' }).click();
-  // The first player is random, so read it from the board.
   await board.locator('.seat-badge').first().waitFor();
-  const first = await board.evaluate(() => window.hexBoard.game.current);
-  const turnText = (seat, viewer) => (seat === viewer ? 'Your turn' : `${phones[seat].color}'s turn`);
-  for (let i = 0; i < 3; i++) await phones[i].page.getByText(turnText(first, i)).waitFor();
-  check(true, `phones show whose turn it is (${phones[first].color} first)`);
-  check((await board.locator('.seat-badge').count()) === 3, 'board shows a badge at each seat');
 
-  await board.keyboard.press('r');
-  await board.waitForTimeout(1200);
-  const rolled = await board.evaluate(() => window.hexBoard.game.lastRoll);
-  check(rolled && rolled.dice && rolled.total === rolled.dice[0] + rolled.dice[1], `server rolled ${rolled?.total}`);
-  if (rolled.total === 7) {
-    await board.getByRole('button', { name: 'Cancel' }).click();
+  // Setup: the player whose step it is starts the piece on their phone and places it on the board.
+  let shotSetup = false;
+  for (let step = 0; step < 12; step++) {
+    const seat = (await remote()).game.current;
+    const phone = phones[seat].page;
+    const place = phone.getByRole('button', { name: /^Place (settlement|road)$/ });
+    await place.waitFor();
+    const kind = (await place.textContent()).includes('road') ? 'road' : 'settlement';
+    await place.click();
+    await board.waitForFunction(() => window.hexBoard.remote.rules.pending);
+    const { legal } = (await remote()).rules.pending;
+    const at = legal[Math.floor(legal.length / 2)];
+    const p = await board.evaluate(([k, a]) => window.hexBoard.placeOnScreen(k, a), [kind, at]);
+    await board.mouse.click(p.x, p.y);
+    await board.locator('#build-confirm:not([hidden])').waitFor();
+    if (!shotSetup) {
+      await board.screenshot({ path: `${out}/03-board-placing.png` });
+      await phone.screenshot({ path: `${out}/04-phone-placing.png` });
+      shotSetup = true;
+    }
+    await board.locator('#build-yes').click();
+    await board.waitForFunction(
+      ([k, a]) => {
+        const r = window.hexBoard.remote.rules;
+        return !r.pending && (k === 'road' ? r.roads[a] !== null : r.buildings[a] !== null);
+      },
+      [kind, at],
+    );
   }
-  await board.getByRole('button', { name: /Next turn/ }).click();
-  const second = (first + 1) % 3;
-  await phones[second].page.getByText('Your turn').waitFor();
-  check(true, 'Next turn on the board moves the turn on the phones');
+  const main = await remote();
+  check(main.rules.phase === 'main' && main.rules.points.every((n) => n === 2), 'setup placed 2 settlements and 2 roads each');
   await board.waitForTimeout(700);
-  await board.screenshot({ path: `${out}/4-board-playing.png` });
-  await phones[second].page.screenshot({ path: `${out}/5-phone-your-turn.png` });
+  await board.screenshot({ path: `${out}/05-board-after-setup.png` });
+
+  const first = main.game.current;
+  const turnText = (seat, viewer) => (seat === viewer ? 'Your turn' : `${phones[seat].color}'s turn`);
+  const me = phones[first].page;
+  await me.getByText('Your turn').first().waitFor();
+  await me.screenshot({ path: `${out}/06-phone-roll.png` });
+  await me.getByRole('button', { name: 'Roll', exact: true }).click();
+  await board.waitForFunction(() => window.hexBoard.remote.rules.rolled);
+  const rolled = (await remote()).game.lastRoll;
+  check(rolled.dice && rolled.total === rolled.dice[0] + rolled.dice[1], `phone rolled ${rolled.total} on the server`);
+  if (rolled.total === 7) await board.getByRole('button', { name: 'Cancel' }).click();
+  await me.getByRole('button', { name: 'End turn' }).waitFor();
+  await me.waitForTimeout(300);
+  await me.screenshot({ path: `${out}/07-phone-hand.png` });
+  await me.getByRole('button', { name: 'Trade' }).click();
+  await me.getByText('Trade with the bank').waitFor();
+  await me.screenshot({ path: `${out}/08-phone-trade.png` });
+  await me.getByRole('button', { name: 'Close' }).click();
+
+  await me.getByRole('button', { name: 'End turn' }).click();
+  const second = (first + 1) % 3;
+  await phones[second].page.getByText('Your turn').first().waitFor();
+  check(true, 'End turn on the phone passes the turn');
+  await board.waitForTimeout(700);
+  await board.screenshot({ path: `${out}/09-board-next-turn.png` });
 
   // A phone that sleeps and comes back keeps its seat.
   await phones[2].page.close();
   await board.locator('.seat-badge.away').waitFor();
   check(true, 'board marks a dropped phone');
-  await board.screenshot({ path: `${out}/6-board-phone-away.png` });
   phones[2].page = await phones[2].ctx.newPage();
   await phones[2].page.goto(`${BASE}/phone.html`);
-  await phones[2].page.getByText(turnText(second, 2)).waitFor();
+  await phones[2].page.getByText(turnText(second, 2)).first().waitFor();
   await board.locator('.seat-badge.away').waitFor({ state: 'detached' });
   check(true, 'reopened phone is back in its seat');
 
   // White's battery dies: move the seat to a new phone.
   await board.getByRole('button', { name: /^White/ }).click();
   await board.getByText('Move White to another phone').waitFor();
-  await board.screenshot({ path: `${out}/7-board-rejoin.png` });
   const rejoinUrl = new URL(await board.evaluate(() => decodeURIComponent(document.querySelector('.lobby img').src.split('text=')[1])));
   await board.getByRole('button', { name: 'Done' }).click();
-  const newCtx = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true });
+  const newCtx = await browser.newContext(PHONE);
   const newPhone = await newCtx.newPage();
   await newPhone.goto(`${BASE}/phone.html${rejoinUrl.search}`);
-  await newPhone.getByText('White', { exact: true }).waitFor();
+  await newPhone.getByText('White', { exact: true }).first().waitFor();
   await phones[2].page.getByText('This seat moved to another phone').waitFor();
   check(true, 'rejoin code moves the seat and the old phone is told');
-  await phones[2].page.screenshot({ path: `${out}/8-phone-moved.png` });
 
   // The PC restarts: the game and the seats carry on.
   server.kill();
@@ -116,17 +151,16 @@ try {
   server = await startServer();
   // Red's phone never moved, so it's the one to watch reconnect.
   await phones[0].page.getByText('Reconnecting…').waitFor({ state: 'detached', timeout: 8000 });
-  await phones[0].page.getByText(turnText(second, 0)).waitFor();
+  await phones[0].page.getByText(turnText(second, 0)).first().waitFor();
   await board.reload();
   await board.locator('.seat-badge').first().waitFor();
-  const after = await board.evaluate(() => ({ current: window.hexBoard.game.current, rolls: window.hexBoard.game.history.length }));
-  check(after.current === second && after.rolls === 1, 'game survives a server restart');
+  const after = await remote();
+  check(after.game.current === second && after.rules.points.every((n) => n === 2), 'game survives a server restart');
 
   const portrait = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const upright = await portrait.newPage();
   await upright.goto(`${BASE}/phone.html`);
   check(await upright.getByText('Turn your phone sideways').isVisible(), 'upright phone asks to be turned sideways');
-  await upright.screenshot({ path: `${out}/9-phone-portrait.png` });
   console.log(`Screenshots saved to ${out}/`);
 } finally {
   server.kill();

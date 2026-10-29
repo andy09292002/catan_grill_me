@@ -161,49 +161,99 @@ describe('getting back in', () => {
   });
 });
 
+/** Plays setup through the lobby: each phone starts its piece, the board picks a spot and confirms. */
+function playSetup(t: ReturnType<typeof fullTable>) {
+  const view = () => t.board.last('board')!.view;
+  t.say(t.board, { type: 'start' });
+  while (view().rules.phase === 'setup') {
+    const seat = view().game.current;
+    const kind = view().rules.buildings.filter((b) => b?.seat === seat).length > view().rules.roads.filter((r) => r === seat).length ? 'road' : 'settlement';
+    t.say(t.phones[seat], { type: 'act', action: { type: 'build', kind } });
+    t.say(t.board, { type: 'act', action: { type: 'pick', at: view().rules.pending!.legal[0] } });
+    t.say(t.board, { type: 'act', action: { type: 'confirm' } });
+  }
+}
+
 describe('playing', () => {
-  it('rolls on the server and sends the roll to every device', () => {
-    const { say, board, phones } = fullTable();
-    say(board, { type: 'start' });
-    say(board, { type: 'roll' });
-    expect(board.last('board')).toMatchObject({ event: { kind: 'roll', roll: { total: 7, dice: [3, 4] } } });
-    say(board, { type: 'enterRoll', total: 11 });
-    expect(board.last('board')!.view.game.lastRoll).toEqual({ total: 11, dice: null });
-    say(board, { type: 'enterRoll', total: 13 });
-    expect(board.last('board')!.view.game.history).toHaveLength(2);
-    say(board, { type: 'nextTurn' });
-    expect(phones[1].last('phone')!.view.current).toBe(1);
+  it('plays setup with pieces started on the phone and placed on the board', () => {
+    const t = fullTable();
+    playSetup(t);
+    const view = t.board.last('board')!.view;
+    expect(view.rules.phase).toBe('main');
+    expect(view.rules.points).toEqual([2, 2, 2]);
+    expect(view.game.current).toBe(0);
+    expect(t.phones[0].last('phone')!.view.me!.can.roll).toBe(true);
+    expect(t.phones[1].last('phone')!.view.me!.can.roll).toBe(false);
+  });
+
+  it('rolls on the server, from the board or the current phone', () => {
+    const t = fullTable();
+    playSetup(t);
+    t.say(t.board, { type: 'act', action: { type: 'roll' } });
+    expect(t.board.last('board')).toMatchObject({ event: { kind: 'roll', roll: { total: 7, dice: [3, 4] } } });
+    t.say(t.phones[0], { type: 'act', action: { type: 'endTurn' } });
+    expect(t.phones[1].last('phone')!.view.current).toBe(1);
+    t.say(t.phones[1], { type: 'act', action: { type: 'enterRoll', total: 11 } });
+    expect(t.board.last('board')!.view.game.lastRoll).toEqual({ total: 11, dice: null });
+  });
+
+  it('tells a phone why a move was refused', () => {
+    const t = fullTable();
+    playSetup(t);
+    t.say(t.phones[1], { type: 'act', action: { type: 'roll' } });
+    expect(t.phones[1].last('error')!.message).toBe('Not your turn');
+  });
+
+  it('keeps each device to its own moves', () => {
+    const t = fullTable();
+    t.say(t.board, { type: 'start' });
+    // Only phones start builds; only the board picks spots.
+    t.say(t.board, { type: 'act', action: { type: 'build', kind: 'settlement' } });
+    expect(t.board.last('board')!.view.rules.pending).toBeNull();
+    t.say(t.phones[0], { type: 'act', action: { type: 'build', kind: 'settlement' } });
+    const legal = t.board.last('board')!.view.rules.pending!.legal;
+    t.say(t.phones[0], { type: 'act', action: { type: 'pick', at: legal[0] } });
+    expect(t.board.last('board')!.view.rules.pending!.at).toBeNull();
   });
 
   it('does nothing in the game before it starts', () => {
-    const { say, board } = fullTable();
-    say(board, { type: 'roll' });
-    expect(board.last('board')!.view.game.history).toHaveLength(0);
+    const { say, board, phones } = fullTable();
+    say(phones[0], { type: 'act', action: { type: 'build', kind: 'settlement' } });
+    expect(board.last('board')!.view.rules.pending).toBeNull();
   });
 
   it('moves the thief to another tile only', () => {
-    const { say, board } = fullTable();
-    say(board, { type: 'start' });
-    const from = board.last('board')!.view.game.thiefTile!;
-    say(board, { type: 'moveThief', tile: from });
-    expect(board.last('board')!.event).toEqual({ kind: 'start' });
-    say(board, { type: 'moveThief', tile: (from + 1) % 19 });
-    expect(board.last('board')).toMatchObject({ event: { kind: 'thief' }, view: { game: { thiefTile: (from + 1) % 19 } } });
+    const t = fullTable();
+    playSetup(t);
+    const from = t.board.last('board')!.view.game.thiefTile!;
+    t.say(t.board, { type: 'act', action: { type: 'moveThief', tile: from } });
+    expect(t.board.last('error')).toBeTruthy();
+    t.say(t.board, { type: 'act', action: { type: 'moveThief', tile: (from + 1) % 19 } });
+    expect(t.board.last('board')).toMatchObject({ event: { kind: 'thief' }, view: { game: { thiefTile: (from + 1) % 19 } } });
   });
 
-  it('never sends phones the whole game', () => {
-    const { say, board, phones } = fullTable();
-    say(board, { type: 'start' });
-    for (const p of phones) for (const m of p.inbox) expect(JSON.stringify(m)).not.toContain('"game"');
+  it('never sends anyone another player’s cards', () => {
+    const t = fullTable();
+    playSetup(t);
+    const hands = t.board.last('board')!.view.rules.cards;
+    expect(hands.some((n) => n > 0)).toBe(true);
+    for (const m of t.board.inbox) expect(JSON.stringify(m)).not.toMatch(/"hands"|"hand"|"bank"/);
+    t.phones.forEach((p, seat) => {
+      for (const m of p.inbox) {
+        const text = JSON.stringify(m);
+        expect(text).not.toMatch(/"game"|"hands"|"bank"/);
+        if (m.type === 'phone' && m.view.me) expect(m.view.you).toBe(seat);
+      }
+    });
   });
 });
 
 describe('saving', () => {
   it('saves after every change and carries on from the save', () => {
-    const { say, board, saves } = fullTable();
-    say(board, { type: 'start' });
-    say(board, { type: 'roll' });
-    const saved = saves.at(-1)!;
+    const t = fullTable();
+    playSetup(t);
+    t.say(t.board, { type: 'act', action: { type: 'roll' } });
+    const saved = t.saves.at(-1)!;
     expect(isSavedTable(saved)).toBe(true);
     expect(saved.started).toBe(true);
 
@@ -229,7 +279,8 @@ describe('saving', () => {
     say(board, { type: 'start' });
     const good = saves.at(-1)!;
     expect(isSavedTable({ ...good, keys: good.keys.slice(1) })).toBe(false);
-    expect(isSavedTable({ ...good, version: 2 })).toBe(false);
+    expect(isSavedTable({ ...good, version: 1 })).toBe(false);
+    expect(isSavedTable({ ...good, rules: { ...good.rules, bank: { ...good.rules.bank, ore: 0 } } })).toBe(false);
     expect(isSavedTable({ ...good, game: { ...good.game, current: 9 } })).toBe(false);
   });
 });

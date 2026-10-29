@@ -620,3 +620,62 @@ body {
   border-style: dashed;
   color: var(--red);
 }
+
+/* Board + phones: player panels and the build confirm */
+
+.seat-badge .stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 10px;
+  border-left: 1.5px solid var(--panel-edge);
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+.seat-badge .stat b {
+  color: var(--ink);
+  font-size: 17px;
+}
+.seat-badge .card-icon {
+  width: 11px;
+  height: 15px;
+  border-radius: 2px;
+  border: 1.5px solid currentColor;
+}
+.seat-badge.over {
+  box-shadow: 0 0 0 3px rgba(255, 107, 94, 0.55), 0 0 18px rgba(255, 107, 94, 0.7);
+}
+.seat-badge.over .cards,
+.seat-badge.over .cards b {
+  color: var(--red);
+}
+
+.build-confirm {
+  position: fixed;
+  z-index: 3;
+  display: flex;
+  gap: 18px;
+}
+.build-confirm[hidden] {
+  display: none;
+}
+.build-confirm button {
+  width: clamp(56px, 7vmin, 80px);
+  height: clamp(56px, 7vmin, 80px);
+  border-radius: 50%;
+  border: 3px solid #1a1406;
+  font: inherit;
+  font-size: clamp(26px, 3.6vmin, 40px);
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+.confirm-yes {
+  background: #3fb950;
+  color: #fff;
+}
+.confirm-no {
+  background: #c8392f;
+  color: #fff;
+}

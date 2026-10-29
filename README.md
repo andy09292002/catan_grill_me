@@ -13,8 +13,8 @@ The full design and every decision behind it are in [grillMe.md](grillMe.md).
 | 3 | Game flow: New game screen, dice, turns, text rotation, saving | Done |
 | 4 | Thief | Done |
 | 5 | Animation | Done |
-| 6 | Board + phones: local table server, joining by QR code, seat keys and rejoin | In review |
-| 7 | Board + phones: rules engine, building, trading, the phone hand | Planned |
+| 6 | Board + phones: local table server, joining by QR code, seat keys and rejoin | Done |
+| 7 | Board + phones: rules engine, building, trading, the phone hand | In review |
 | 8 | Board + phones: the 7, discards, the thief and face-down steals | Planned |
 | 9 | Board + phones: development cards, Largest Army, Longest Road, winning | Planned |
 | 10 | Board + phones: 5–6 players, special build phase, a double-click exe | Planned |
@@ -77,7 +77,16 @@ This builds the app and starts the server. It prints two addresses: open the fir
 
 Some routers also keep devices apart ("AP isolation" or a guest network); use the main network, not the guest one.
 
-For now (milestone 6) the phones show only their color and whose turn it is; the cards and actions come with the rules in milestones 7 to 9. Rolling, Next turn and the thief work from the board as in Board only, with the server rolling the dice.
+**Playing.** The PC runs the base-game rules; nobody needs to count.
+
+- **Setup.** In turn, then back the other way, each player taps **Place settlement** (then **Place road**) on their phone. Legal spots glow on the board in their color: tap one, then **✓** next to it (or **✗**). The second settlement brings one card from each tile around it.
+- **Rolling.** Tap **Roll** on your phone or on the board, or roll real dice and enter the total on either. Every settlement next to a tile with that number gets a card, every city two, straight into the phones. The thief's tile pays nothing.
+- **Building.** After rolling, your phone shows **Road**, **Settlement** and **City** with their costs; the ones you can afford light up. Pick one, then place it on the board as in setup. **Undo last** takes back your last piece until anything else happens. Buying and trades are final.
+- **Trading.** Talk it out, then on your phone tap **Trade**: either the **Bank** (4 for 1, or 3 or 2 for 1 with a harbor; your rates are shown) or another player, choosing what you give and get. They tap **Accept** or **Decline** on theirs.
+- **End turn** on your phone, or **Next turn** on the board.
+- Your phone, held sideways, shows your cards fanned like a hand. The panel at your edge of the board shows everyone your points and how many cards you hold, and glows red over 7.
+
+Still to come: a 7 only lets you move the thief for now (discarding and stealing arrive in milestone 8); development cards, Largest Army, Longest Road and the win in milestone 9.
 
 A URL like `?size=30&mode=balancedPlus&seed=12345&players=5&thief=physical` opens a fixed board for testing or sharing without touching the saved game. Modes are `random`, `balanced` and `balancedPlus`.
 
@@ -90,7 +99,9 @@ npm run screenshots
 node scripts/table.mjs
 ```
 
-`node scripts/table.mjs` also needs a build. It starts the table server on a spare port, opens the board and three phones in separate browsers, and checks joining, turns, a dropped phone coming back, moving a seat with the rejoin code, a server restart, and the sideways prompt. Its screenshots go to `screenshots/table/`.
+`node scripts/table.mjs` also needs a build. It starts the table server on a spare port, opens the board and three phones in separate browsers, and checks joining, setup with pieces started on the phones and placed on the board, rolling from a phone, the trade sheet, ending a turn, a dropped phone coming back, moving a seat with the rejoin code, a server restart, and the sideways prompt. Its screenshots go to `screenshots/table/`.
+
+`npm test` includes bot games: bots play through the real server logic, mixing legal moves with nonsense, and every saved state is checked against the rules (no card made or lost, settlements apart, roads connected, refused moves change nothing). It plays 60 games; `SIM_GAMES=1000 npx vitest run server/sim` plays more.
 
 `npm run screenshots` needs a build first. It saves the New game screen, both boards, a mid-game roll, and the thief being moved and blocking a tile at 1920×1080, 1366×768, 2560×1440 and 1024×768 into `screenshots/`, using the installed Microsoft Edge. CI runs the tests and screenshots on every push and uploads the screenshots as a build artifact.
 
@@ -106,10 +117,11 @@ The app icons in `public/` are rendered from `public/favicon.svg` with `node scr
 - `src/game/` – players and seats, dice, turns, the thief, saving, the animation preference, and their tests
 - `src/render/` – fitting the board to the screen, drawing it on a canvas, the animated terrain art and the frame-time watcher
 - `src/ui/` – New game screen, confirmation, number pad, roll banner, the joining screen and seat badges
-- `src/net/` – messages between the table server, the board and the phones, and the reconnecting socket
+- `src/rules/` – the base-game rules for Board + phones (corners and sides of the board, setup, production, building, undo, trades) and a test for each rule
+- `src/net/` – messages between the table server, the board and the phones, what each device may see, and the reconnecting socket
 - `src/phone/` – the phone page for Board + phones
 - `src/main.ts` – app controller: corner controls, animation and saving, and the board's side of Board + phones
-- `server/` – the table server (`table.ts`) and the seats and game it runs (`lobby.ts`), with tests
+- `server/` – the table server (`table.ts`) and the seats and game it runs (`lobby.ts`), with tests and the bot games (`sim.test.ts`)
 - `phone.html` – the page phones open
 - `public/` – app icons
 - `scripts/screenshots.mjs` – headless screenshots at several screen sizes

@@ -1,6 +1,6 @@
 import { restoreBoard, type Board, type RandomMode } from './board/generate';
 import { rollDice, THIEF_NUMBER } from './game/dice';
-import { PLAYER_HEX, PLAYER_NAMES, defaultColors, seatDirection } from './game/players';
+import { PLAYER_HEX, PLAYER_NAMES, defaultColors, seatAngle, seatDirection } from './game/players';
 import {
   createGame,
   currentAngle,
@@ -18,6 +18,8 @@ import { loadGame, saveGame } from './game/storage';
 import { drawBase, drawLive } from './render/draw';
 import { fitBoard, pickTile, type Fit } from './render/fit';
 import { FrameBudget } from './render/perf';
+import { pickPlace, placeAt, type PiecesView } from './render/pieces';
+import { geometryOf, type BuildKind } from './rules/engine';
 import { showBanner, TUMBLE_MS, type BannerHandle } from './ui/banner';
 import { confirmDialog } from './ui/confirm';
 import { openPad } from './ui/pad';
@@ -35,6 +37,7 @@ const FLASH_MS = 3000;
 const FLASH_PERIOD_MS = 375;
 const TURN_MS = 500;
 const THIEF_PULSE_MS = 1200;
+const HINT_PULSE_MS = 1400;
 /** Calm only sways slowly, so it redraws at about 30 fps to save power. */
 const CALM_FRAME_MS = 33;
 /** Full animation drops to Calm if frames average longer than this to draw. */
@@ -126,7 +129,7 @@ function render(now: number) {
   const flashing = now - flashStart < FLASH_MS;
 
   const level = animationLevel();
-  const busy = t < 1 || flashing || !!choosingThief;
+  const busy = t < 1 || flashing || !!choosingThief || !!remote?.rules.pending;
   // Calm skips frames unless something else on the board is moving.
   if (level === 'calm' && !busy && now - lastDraw < CALM_FRAME_MS) {
     requestRender();
@@ -169,6 +172,7 @@ function render(now: number) {
         ? null
         : { tile: game.thiefTile, choosing: !!choosingThief, pulse: choosingThief ? (now % THIEF_PULSE_MS) / THIEF_PULSE_MS : 0 },
     animation: { t: now / 1000, level },
+    pieces: piecesView(now),
   });
 
   const drawMs = performance.now() - started;
@@ -179,6 +183,39 @@ function render(now: number) {
     showToast('Animation eased to Calm to keep the board smooth');
   }
   if (busy || level !== 'off') requestRender();
+}
+
+function piecesView(now: number): PiecesView | null {
+  if (!remote || !game) return null;
+  const colors = game.colors.map((c) => PLAYER_HEX[c]);
+  const p = remote.rules.pending;
+  return {
+    geometry: geometryOf(remote.game),
+    buildings: remote.rules.buildings,
+    roads: remote.rules.roads,
+    colors,
+    pending: p && { kind: p.kind, legal: p.legal, at: p.at, color: colors[p.seat] },
+    pulse: (now % HINT_PULSE_MS) / HINT_PULSE_MS,
+  };
+}
+
+/** ✓ and ✗ beside a piece waiting to be placed, turned to face its player. */
+function updateBuildConfirm() {
+  const box = document.querySelector<HTMLElement>('#build-confirm')!;
+  const p = remote?.started ? remote.rules.pending : null;
+  if (!p || p.at === null || !board) {
+    box.hidden = true;
+    return;
+  }
+  const fit = fitBoard(board.layout, window.innerWidth, window.innerHeight);
+  const at = placeAt(fit, geometryOf(remote!.game), p.kind, p.at);
+  // Just past the piece on its player's side, so a hand reaching in doesn't cover the piece.
+  const d = seatDirection(angleTo);
+  const reach = fit.scale * 0.62;
+  box.hidden = false;
+  box.style.left = `${at.x + d.x * reach}px`;
+  box.style.top = `${at.y + d.y * reach}px`;
+  box.style.transform = `translate(-50%, -50%) rotate(${angleTo}deg)`;
 }
 
 function showToast(message: string) {
@@ -243,11 +280,18 @@ function stopChoosingThief() {
 }
 
 function onBoardTap(e: PointerEvent) {
-  if (!game || !board || !choosingThief || rolling) return;
+  if (!game || !board || rolling) return;
   const fit = fitBoard(board.layout, window.innerWidth, window.innerHeight);
+  const pending = remote?.started ? remote.rules.pending : null;
+  if (pending) {
+    const at = pickPlace(fit, geometryOf(remote!.game), pending.kind, pending.legal, { x: e.clientX, y: e.clientY });
+    if (at !== null) table!.send({ type: 'act', action: { type: 'pick', at } });
+    return;
+  }
+  if (!choosingThief) return;
   const tile = pickTile(board.layout, fit, { x: e.clientX, y: e.clientY });
   if (tile === null || tile === game.thiefTile) return;
-  if (remote) table!.send({ type: 'moveThief', tile });
+  if (remote) table!.send({ type: 'act', action: { type: 'moveThief', tile } });
   else setGame(moveThief(game, tile));
   stopChoosingThief();
 }
@@ -255,7 +299,7 @@ function onBoardTap(e: PointerEvent) {
 function applyRoll(roll: Roll) {
   if (!game) return;
   if (remote) {
-    table!.send(roll.dice ? { type: 'roll' } : { type: 'enterRoll', total: roll.total });
+    table!.send({ type: 'act', action: roll.dice ? { type: 'roll' } : { type: 'enterRoll', total: roll.total } });
     return;
   }
   stopChoosingThief();
@@ -301,7 +345,7 @@ function advanceTurn() {
   if (!game) return;
   stopChoosingThief();
   if (remote) {
-    table!.send({ type: 'nextTurn' });
+    table!.send({ type: 'act', action: { type: 'endTurn' } });
     return;
   }
   turnTowardsNext(game.colors.length);
@@ -311,6 +355,15 @@ function advanceTurn() {
 function turnTowardsNext(players: number) {
   angleFrom = angle;
   angleTo += 360 / players;
+  angleStart = performance.now();
+}
+
+/** Turns the text the short way round to face `seat`; setup goes back round the table, so it isn't always forwards. */
+function turnTowards(seat: number, players: number) {
+  const delta = ((((seatAngle(seat, players) - angleTo) % 360) + 540) % 360) - 180;
+  if (Math.abs(delta) < 0.01) return;
+  angleFrom = angle;
+  angleTo += delta;
   angleStart = performance.now();
 }
 
@@ -361,6 +414,10 @@ function onServer(msg: ServerMessage) {
     }
     return;
   }
+  if (msg.type === 'error') {
+    showToast(msg.message);
+    return;
+  }
   if (msg.type === 'rejoinCode') {
     if (remote) void showRejoin(remote.seats[msg.seat].color, msg.url);
     return;
@@ -381,7 +438,7 @@ function onServer(msg: ServerMessage) {
     showRoll(event.roll);
   } else if (event?.kind === 'turn') {
     stopChoosingThief();
-    turnTowardsNext(view.game.colors.length);
+    turnTowards(view.game.current, view.game.colors.length);
     setGame(view.game);
   } else {
     setGame(view.game);
@@ -398,7 +455,9 @@ function onServer(msg: ServerMessage) {
 }
 
 function renderBadges() {
-  renderSeatBadges(document.querySelector('#seat-badges')!, remote?.started ? remote.seats : null, (seat) => table?.send({ type: 'rejoinCode', seat }));
+  const stats = remote ? remote.seats.map((_, s) => ({ points: remote!.rules.points[s], cards: remote!.rules.cards[s] })) : [];
+  renderSeatBadges(document.querySelector('#seat-badges')!, remote?.started ? remote.seats : null, stats, (seat) => table?.send({ type: 'rejoinCode', seat }));
+  updateBuildConfirm();
 }
 
 function startGame(options: NewGameOptions) {
@@ -426,6 +485,8 @@ document.querySelector('#roll')!.addEventListener('click', roll);
 document.querySelector('#pad-open')!.addEventListener('click', enterRoll);
 document.querySelector('#next-turn')!.addEventListener('click', advanceTurn);
 document.querySelector('#new-game')!.addEventListener('click', () => newGame());
+document.querySelector('#build-yes')!.addEventListener('click', () => table?.send({ type: 'act', action: { type: 'confirm' } }));
+document.querySelector('#build-no')!.addEventListener('click', () => table?.send({ type: 'act', action: { type: 'cancel' } }));
 document.querySelector('#move-thief')!.addEventListener('click', () => (choosingThief ? stopChoosingThief() : startChoosingThief(null)));
 
 // Keyboard shortcuts for testing on a PC: R roll, N next turn.
@@ -445,6 +506,8 @@ declare global {
     hexBoard?: {
       readonly game: GameState | null;
       readonly remote: BoardView | null;
+      /** Where a spot (or a path, for a road) is on screen, for scripts that tap the board. */
+      placeOnScreen(kind: BuildKind, at: number): { x: number; y: number } | null;
       readonly stats: { level: AnimationLevel; slowDevice: boolean; averageDrawMs: number };
     };
   }
@@ -455,6 +518,10 @@ window.hexBoard = {
   },
   get remote() {
     return remote;
+  },
+  placeOnScreen(kind, at) {
+    if (!remote || !board) return null;
+    return placeAt(fitBoard(board.layout, window.innerWidth, window.innerHeight), geometryOf(remote.game), kind, at);
   },
   get stats() {
     const averageDrawMs = drawTimes.length ? drawTimes.reduce((a, b) => a + b, 0) / drawTimes.length : 0;
