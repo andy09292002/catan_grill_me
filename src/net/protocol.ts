@@ -4,7 +4,7 @@
 
 import type { PlayerColor } from '../game/players';
 import type { GameState, NewGameOptions, Roll } from '../game/state';
-import type { Action, BuildKind, Building, Hand, LogEntry, Resource, Robber, RulesState, Steal, TradeOffer } from '../rules/engine';
+import type { Action, BuildKind, Building, DevCard, Hand, LogEntry, Resource, Robber, RulesState, Steal, TradeOffer } from '../rules/engine';
 
 export const TABLE_PORT = 5180;
 export const SOCKET_PATH = '/ws';
@@ -38,6 +38,16 @@ export interface PublicRules {
   /** A build waiting on the board: where it may go and the spot tapped so far. */
   pending: { seat: number; kind: BuildKind; legal: number[]; at: number | null } | null;
   robber: PublicRobber | null;
+  /** How many development cards each seat holds, face down. */
+  devCards: number[];
+  deckLeft: number;
+  knights: number[];
+  roadLengths: number[];
+  longestRoad: number | null;
+  largestArmy: number | null;
+  winner: number | null;
+  /** Revealed when the game ends: everyone's victory point cards and final points. */
+  final: { points: number[]; pointCards: number[] } | null;
 }
 
 /** The thief's progress after a 7, without the order of the face-down cards. */
@@ -70,6 +80,8 @@ export interface PhoneCan {
   undo: boolean;
   trade: boolean;
   endTurn: boolean;
+  buyCard: boolean;
+  play: Record<Exclude<DevCard, 'point'>, boolean>;
 }
 
 export interface PhoneMe {
@@ -82,6 +94,12 @@ export interface PhoneMe {
   setupNeed: 'settlement' | 'road' | null;
   /** The piece this player is placing on the board. */
   placing: BuildKind | null;
+  /** This player's development cards, oldest first. */
+  devCards: { card: DevCard; isNew: boolean }[];
+  /** Free roads left from road building. */
+  freeRoads: number;
+  /** Points including this player's own victory point cards. */
+  totalPoints: number;
   can: PhoneCan;
 }
 
@@ -103,6 +121,11 @@ export interface PhoneView {
   myOrder: Resource[] | null;
   /** The last card taken, if this phone took it or lost it. */
   stolen: Steal | null;
+  knights: number[];
+  longestRoad: number | null;
+  largestArmy: number | null;
+  winner: number | null;
+  final: PublicRules['final'];
   log: LogEntry[];
 }
 
@@ -112,7 +135,8 @@ export type ClientMessage =
   // Phone
   | { type: 'claim'; seat: number }
   // Board
-  | { type: 'create'; options: NewGameOptions }
+  /** A new game; with `rematch`, everyone keeps their seat and phone and setup starts at once. */
+  | { type: 'create'; options: NewGameOptions; rematch?: boolean }
   | { type: 'close' }
   | { type: 'start' }
   | { type: 'rejoinCode'; seat: number }

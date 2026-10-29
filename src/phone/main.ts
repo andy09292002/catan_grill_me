@@ -1,7 +1,20 @@
 import { PLAYER_HEX, PLAYER_NAMES } from '../game/players';
 import type { PhoneView, ServerMessage } from '../net/protocol';
 import { openSocket } from '../net/socket';
-import { COSTS, hand, handSize, RESOURCE_NAMES, RESOURCES, type Action, type BuildKind, type Hand, type Resource } from '../rules/engine';
+import {
+  COSTS,
+  DEV_COST,
+  DEV_NAMES,
+  hand,
+  handSize,
+  RESOURCE_NAMES,
+  RESOURCES,
+  type Action,
+  type BuildKind,
+  type DevCard,
+  type Hand,
+  type Resource,
+} from '../rules/engine';
 import { el } from '../ui/dom';
 import { card, chip } from './cards';
 
@@ -44,7 +57,9 @@ let kicked = false;
 let noTable = false;
 
 /** The open sheet over the hand, if any. */
-let sheet: 'trade' | 'pad' | null = null;
+let sheet: 'trade' | 'pad' | 'cards' | 'plenty' | 'monopoly' | null = null;
+/** Year of plenty's two picks, in order. */
+let plentyPicks: Resource[] = [];
 let tradeWith: number | 'bank' = 'bank';
 let bankGive: Resource | null = null;
 let bankGet: Resource | null = null;
@@ -133,6 +148,7 @@ function render() {
 
   const me = v.seats[v.you];
   document.body.style.setProperty('--player', PLAYER_HEX[me.color]);
+  if (v.winner !== null && v.final) return show(finishScreen(v));
   if (!v.started || !v.me) {
     const joined = v.seats.filter((s) => s.claimed).length;
     const status = joined < v.seats.length ? `Waiting for players · ${joined} of ${v.seats.length} joined` : 'Everyone is in. Start the game on the board.';
@@ -150,6 +166,131 @@ function render() {
       robberOverlay(v),
       sheet === 'trade' ? tradeSheet(v) : null,
       sheet === 'pad' ? padSheet() : null,
+      sheet === 'cards' ? cardsSheet(v) : null,
+      sheet === 'plenty' ? plentySheet() : null,
+      sheet === 'monopoly' ? monopolySheet() : null,
+    ),
+  );
+}
+
+/** The game is over: who won, and everyone's points with the hidden cards turned up. */
+function finishScreen(v: PhoneView) {
+  const final = v.final!;
+  const order = v.seats.map((_, s) => s).sort((a, b) => final.points[b] - final.points[a]);
+  return el(
+    'section',
+    { class: 'screen finish' },
+    el('h1', {}, v.winner === v.you ? 'You win!' : `${colorName(v, v.winner!)} wins!`),
+    el(
+      'ol',
+      { class: 'scores' },
+      ...order.map((s) =>
+        el(
+          'li',
+          { class: s === v.you ? 'me' : '' },
+          el('span', { class: 'dot', style: `background:${PLAYER_HEX[v.seats[s].color]}` }),
+          colorName(v, s),
+          el('b', {}, `${final.points[s]} pts`),
+          final.pointCards[s] ? el('small', {}, `${final.pointCards[s]} hidden`) : null,
+        ),
+      ),
+    ),
+    el('p', { class: 'hint' }, 'Rematch from the board to play again with the same seats.'),
+  );
+}
+
+const DEV_INFO: Record<DevCard, string> = {
+  knight: 'Move the thief and take a card. Three or more knights can win Largest Army.',
+  roads: 'Place two roads for free.',
+  plenty: 'Take any two cards from the bank.',
+  monopoly: 'Name a card: everyone gives you all of theirs.',
+  point: 'One point. Kept secret until the game ends.',
+};
+
+function cardsSheet(v: PhoneView) {
+  const me = v.me!;
+  const close = button('Close', 'secondary', () => ((sheet = null), render()));
+  const rows = me.devCards.map(({ card, isNew }) => {
+    let action: HTMLElement;
+    if (card === 'point') action = el('span', { class: 'hint' }, 'Counts by itself');
+    else if (isNew) action = el('span', { class: 'hint' }, 'New: play from next turn');
+    else {
+      action = button('Play', 'primary', () => {
+        if (card === 'plenty') {
+          plentyPicks = [];
+          sheet = 'plenty';
+        } else if (card === 'monopoly') {
+          sheet = 'monopoly';
+        } else {
+          act({ type: 'playCard', card });
+          sheet = null;
+        }
+        render();
+      });
+      (action as HTMLButtonElement).disabled = !me.can.play[card];
+    }
+    return el('li', {}, el('div', {}, el('b', {}, DEV_NAMES[card]), el('p', { class: 'hint' }, DEV_INFO[card])), action);
+  });
+  return el(
+    'div',
+    { class: 'sheet-back' },
+    el(
+      'div',
+      { class: 'sheet cards' },
+      el('h2', {}, 'Your development cards'),
+      rows.length ? el('ul', { class: 'dev-list' }, ...rows) : el('p', { class: 'hint' }, 'None yet. Buy one for a wool, a grain and an ore.'),
+      el('p', { class: 'hint' }, 'One card a turn, at any time in your turn, even before rolling.'),
+      el('div', { class: 'row' }, close),
+    ),
+  );
+}
+
+function plentySheet() {
+  const pickRow = RESOURCES.map((r) => {
+    const b = resButton(r, '', false, () => {
+      if (plentyPicks.length < 2) plentyPicks.push(r);
+      render();
+    });
+    b.disabled = plentyPicks.length >= 2;
+    return b;
+  });
+  const ok = button('Take them', 'primary', () => {
+    act({ type: 'playCard', card: 'plenty', take: plentyPicks });
+    sheet = null;
+    render();
+  });
+  ok.disabled = plentyPicks.length !== 2;
+  return el(
+    'div',
+    { class: 'sheet-back' },
+    el(
+      'div',
+      { class: 'sheet' },
+      el('h2', {}, 'Year of plenty: take two cards'),
+      el('div', { class: 'trade-line' }, ...pickRow),
+      el('div', { class: 'trade-line' }, el('span', { class: 'label' }, 'Taking'), ...plentyPicks.map((r) => chip(r, 1))),
+      el('div', { class: 'row' }, button('Back', 'secondary', () => ((plentyPicks = []), (sheet = 'cards'), render())), ok),
+    ),
+  );
+}
+
+function monopolySheet() {
+  const choices = RESOURCES.map((r) =>
+    resButton(r, '', false, () => {
+      act({ type: 'playCard', card: 'monopoly', resource: r });
+      sheet = null;
+      render();
+    }),
+  );
+  return el(
+    'div',
+    { class: 'sheet-back' },
+    el(
+      'div',
+      { class: 'sheet' },
+      el('h2', {}, 'Monopoly: which card does everyone give you?'),
+      el('div', { class: 'trade-line' }, ...choices),
+      el('div', { class: 'row' }, button('Back', 'secondary', () => ((sheet = 'cards'), render()))),
     ),
   );
 }
@@ -190,7 +331,13 @@ function topBar(v: PhoneView) {
     'header',
     { class: 'bar' },
     el('span', { class: 'me' }, el('span', { class: 'dot' }), PLAYER_NAMES[v.seats[v.you!].color]),
-    el('span', { class: 'points' }, el('b', {}, String(me.points)), ' pts'),
+    el(
+      'span',
+      { class: 'points', title: 'Your points, counting your secret victory point cards' },
+      el('b', {}, String(me.totalPoints)),
+      ' pts',
+      me.totalPoints > me.points ? el('small', {}, ` (${me.totalPoints - me.points} secret)`) : null,
+    ),
     el('span', { class: 'status' }, status),
     !connected && el('span', { class: 'warn' }, 'Reconnecting…'),
     v.lastRoll && el('span', { class: `last-roll${v.lastRoll.total === 6 || v.lastRoll.total === 8 ? ' red' : ''}` }, String(v.lastRoll.total)),
@@ -225,9 +372,15 @@ function actions(v: PhoneView) {
     if (c.undo) items.push(button('Undo last', 'secondary', () => act({ type: 'undo' })));
     return el('nav', { class: 'actions' }, ...items);
   }
+  const cardsButton = () => {
+    const n = me.devCards.length;
+    const b = button(n ? `Cards (${n})` : 'Cards', 'secondary', () => ((sheet = 'cards'), render()));
+    return b;
+  };
+  if (me.freeRoads > 0) items.push(button(`Place free road (${me.freeRoads} left)`, 'primary big', () => act({ type: 'build', kind: 'road' })));
   if (c.roll) {
     items.push(button('Roll', 'primary big', () => act({ type: 'roll' })));
-    items.push(button('Enter dice', 'secondary', () => ((sheet = 'pad'), render())));
+    items.push(el('div', { class: 'pair' }, button('Enter dice', 'secondary', () => ((sheet = 'pad'), render())), cardsButton()));
   }
   if (v.current === v.you && !c.roll) {
     for (const kind of ['road', 'settlement', 'city'] as BuildKind[]) {
@@ -236,9 +389,12 @@ function actions(v: PhoneView) {
       b.append(el('span', { class: 'label' }, BUILD_LABELS[kind]), el('span', { class: 'cost' }, ...costChips(COSTS[kind])), el('span', { class: 'left' }, `${me.pieces[kind]} left`));
       items.push(b);
     }
+    const buy = button('', 'build', () => act({ type: 'buyCard' }));
+    buy.disabled = !c.buyCard;
+    buy.append(el('span', { class: 'label' }, 'Card'), el('span', { class: 'cost' }, ...costChips(DEV_COST)));
     const trade = button('Trade', 'secondary', () => ((sheet = 'trade'), render()));
     trade.disabled = !c.trade;
-    items.push(trade);
+    items.push(buy, el('div', { class: 'pair' }, trade, cardsButton()));
     if (c.undo) items.push(button('Undo last', 'secondary', () => act({ type: 'undo' })));
     const end = button('End turn', 'primary', () => act({ type: 'endTurn' }));
     end.disabled = !c.endTurn;

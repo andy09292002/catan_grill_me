@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../board/rng';
-import { createGame, type NewGameOptions } from '../game/state';
 import {
-  apply,
   BANK_EACH,
   bankRate,
   COSTS,
@@ -14,62 +12,12 @@ import {
   piecesLeft,
   publicPoints,
   RESOURCES,
-  startTable,
   TERRAIN_RESOURCE,
   victimsAt,
-  type Action,
-  type BuildKind,
   type Hand,
   type Table,
 } from './engine';
-
-const OPTIONS: NewGameOptions = { colors: ['red', 'blue', 'white'], firstSeat: 0, size: 19, mode: 'balanced', seed: 12345, thiefStyle: 'onscreen' };
-
-const fresh = (o: Partial<NewGameOptions> = {}) => startTable(createGame({ ...OPTIONS, ...o }));
-
-function act(t: Table, seat: number, a: Action, roll?: () => [number, number], random?: () => number): Table {
-  const r = apply(t, seat, a, roll, random);
-  if (!r.ok) throw new Error(`${a.type}: ${r.reason}`);
-  return r.table;
-}
-
-function rejects(t: Table, seat: number, a: Action): string {
-  const r = apply(t, seat, a);
-  expect(r.ok, `${a.type} should be refused`).toBe(false);
-  return r.ok ? '' : r.reason;
-}
-
-function buildAt(t: Table, seat: number, kind: BuildKind, at: number): Table {
-  t = act(t, seat, { type: 'build', kind });
-  t = act(t, seat, { type: 'pick', at });
-  return act(t, seat, { type: 'confirm' });
-}
-
-/** Plays setup, putting settlements on the first legal spot of `prefer` (else inland) with the first legal road. */
-function finishSetup(t: Table, prefer: number[] = []): Table {
-  while (t.rules.phase === 'setup') {
-    const seat = t.game.current;
-    const spots = legalPlaces(t, seat, 'settlement');
-    // Inland spots by default, so nobody starts on a harbor.
-    const inland = spots.find((p) => geometryOf(t.game).spots[p].tiles.length === 3);
-    t = buildAt(t, seat, 'settlement', prefer.find((p) => spots.includes(p)) ?? inland ?? spots[0]);
-    t = buildAt(t, seat, 'road', legalPlaces(t, seat, 'road')[0]);
-  }
-  return t;
-}
-
-/** Sets a seat's hand, taking the difference from (or giving it back to) the bank so no card is made. */
-function withCards(t: Table, seat: number, h: Partial<Hand>): Table {
-  const next = hand(h);
-  const hands = t.rules.hands.slice();
-  const bank = { ...t.rules.bank };
-  for (const r of RESOURCES) bank[r] -= next[r] - hands[seat][r];
-  hands[seat] = next;
-  return { ...t, rules: { ...t.rules, hands, bank } };
-}
-
-const rolled = (t: Table, total = 2) => act(t, t.game.current, { type: 'enterRoll', total });
-const cardsInPlay = (t: Table) => RESOURCES.map((r) => t.rules.bank[r] + t.rules.hands.reduce((n, h) => n + h[r], 0));
+import { act, buildAt, cardsInPlay, finishSetup, fresh, rejects, rolled, withCards } from './testing';
 
 describe('setup', () => {
   it('goes round once from the first player, then back the other way, then the first player rolls', () => {

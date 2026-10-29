@@ -522,3 +522,62 @@ button:disabled {
 .toast.good {
   background: #2f8f46;
 }
+
+/* Development cards and the end of the game */
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.bar .points small {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.dev-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.dev-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--panel-edge);
+}
+.dev-list li .hint {
+  font-size: 13px;
+}
+.dev-list li > .hint {
+  flex: 0 0 auto;
+}
+.finish .scores {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: min(420px, 90%);
+}
+.finish .scores li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  font-weight: 800;
+  border-bottom: 1px solid var(--panel-edge);
+}
+.finish .scores li.me {
+  color: var(--player);
+}
+.finish .scores b {
+  margin-left: auto;
+}
+.finish .scores small {
+  color: var(--ink-muted);
+}
+.finish .scores .dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}

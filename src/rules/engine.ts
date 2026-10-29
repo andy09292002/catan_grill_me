@@ -3,6 +3,7 @@ import type { Rng } from '../board/rng';
 import { cryptoRng, rollDice, THIEF_NUMBER, type Dice } from '../game/dice';
 import { PLAYER_NAMES } from '../game/players';
 import { moveThief, nextTurn, recordRoll, type GameState } from '../game/state';
+import { AWARD_POINTS, awardHolder, LARGEST_ARMY_MIN, longestRoad, LONGEST_ROAD_MIN } from './awards';
 import { boardGeometry, type Geometry } from './geometry';
 
 // The base-game rules for Board + phones. Pure functions over plain data, so the server can save
@@ -30,6 +31,24 @@ export const COSTS: Record<BuildKind, Hand> = {
 export const PIECES: Record<BuildKind, number> = { road: 15, settlement: 5, city: 4 };
 export const BANK_EACH = 19;
 
+export type DevCard = 'knight' | 'roads' | 'plenty' | 'monopoly' | 'point';
+export const DEV_CARDS: Record<DevCard, number> = { knight: 14, roads: 2, plenty: 2, monopoly: 2, point: 5 };
+export const DEV_NAMES: Record<DevCard, string> = {
+  knight: 'Knight',
+  roads: 'Road building',
+  plenty: 'Year of plenty',
+  monopoly: 'Monopoly',
+  point: 'Victory point',
+};
+export const DEV_COST = hand({ wool: 1, grain: 1, ore: 1 });
+export const WIN_POINTS = 10;
+
+export interface HeldCard {
+  card: DevCard;
+  /** The turn it was bought; it can't be played that same turn. */
+  bought: number;
+}
+
 export interface Building {
   seat: number;
   kind: 'settlement' | 'city';
@@ -39,6 +58,8 @@ export interface PendingBuild {
   kind: BuildKind;
   /** The spot (or path, for a road) tapped on the board, waiting for ✓; null until one is tapped. */
   at: number | null;
+  /** A road from a road building card, so it costs nothing. */
+  free?: boolean;
 }
 
 export interface TradeOffer {
@@ -58,6 +79,7 @@ export interface LastBuild {
   /** What was paid, or for a second setup settlement the cards it brought in (as a negative refund). */
   paid: Hand;
   granted: Hand;
+  free?: boolean;
 }
 
 /**
@@ -90,7 +112,7 @@ export interface LogEntry {
 }
 
 export interface RulesState {
-  version: 2;
+  version: 3;
   phase: 'setup' | 'main';
   /** Seats in setup order: once round from the first player, then back the other way. */
   setupOrder: number[];
@@ -109,6 +131,17 @@ export interface RulesState {
   lastBuild: LastBuild | null;
   robber: Robber | null;
   lastSteal: Steal | null;
+  /** Development cards still to draw; the last is the top. Never sent to any device. */
+  deck: DevCard[];
+  devCards: HeldCard[][];
+  knights: number[];
+  /** A development card has been played this turn (one a turn, victory points aside). */
+  playedDev: boolean;
+  /** Roads still to place free from a road building card. */
+  freeRoads: number;
+  longestRoad: number | null;
+  largestArmy: number | null;
+  winner: number | null;
   log: LogEntry[];
 }
 
@@ -133,10 +166,12 @@ export type Action =
   | { type: 'moveThief'; tile: number }
   | { type: 'discard'; cards: Hand }
   | { type: 'chooseVictim'; seat: number }
-  | { type: 'steal'; index: number };
+  | { type: 'steal'; index: number }
+  | { type: 'buyCard' }
+  | { type: 'playCard'; card: Exclude<DevCard, 'point'>; take?: Resource[]; resource?: Resource };
 
 /** What just happened, for the board's animations. */
-export type RulesEvent = 'roll' | 'turn' | 'build' | 'pending' | 'trade' | 'thief' | 'undo' | 'robber';
+export type RulesEvent = 'roll' | 'turn' | 'build' | 'pending' | 'trade' | 'thief' | 'undo' | 'robber' | 'card' | 'win';
 
 export type Result = { ok: true; table: Table; event: RulesEvent; roll?: GameState['lastRoll'] } | { ok: false; reason: string };
 
@@ -166,12 +201,12 @@ export function geometryOf(game: GameState): Geometry {
   return g;
 }
 
-export function createRules(game: GameState): RulesState {
+export function createRules(game: GameState, random: Rng = cryptoRng): RulesState {
   const g = geometryOf(game);
   const n = game.colors.length;
   const round = Array.from({ length: n }, (_, i) => (game.firstSeat + i) % n);
   return {
-    version: 2,
+    version: 3,
     phase: 'setup',
     setupOrder: [...round, ...round.slice().reverse()],
     setupStep: 0,
@@ -186,13 +221,24 @@ export function createRules(game: GameState): RulesState {
     lastBuild: null,
     robber: null,
     lastSteal: null,
+    deck: shuffle(
+      (Object.keys(DEV_CARDS) as DevCard[]).flatMap((c) => Array<DevCard>(DEV_CARDS[c]).fill(c)),
+      random,
+    ),
+    devCards: game.colors.map(() => []),
+    knights: game.colors.map(() => 0),
+    playedDev: false,
+    freeRoads: 0,
+    longestRoad: null,
+    largestArmy: null,
+    winner: null,
     log: [{ seat: null, text: 'Setup: each player places a settlement and a road, then again in reverse order.' }],
   };
 }
 
 /** A game with rules starts with the setup player whose step it is. */
-export function startTable(game: GameState): Table {
-  const rules = createRules(game);
+export function startTable(game: GameState, random: Rng = cryptoRng): Table {
+  const rules = createRules(game, random);
   return { game: { ...game, current: rules.setupOrder[0] }, rules };
 }
 
@@ -207,9 +253,25 @@ export function piecesLeft(r: RulesState, seat: number): Record<BuildKind, numbe
   };
 }
 
-/** Points everyone can see: 1 per settlement, 2 per city. */
+/** Points everyone can see: 1 per settlement, 2 per city, 2 each for Longest Road and Largest Army. */
 export function publicPoints(r: RulesState, seat: number): number {
-  return r.buildings.reduce((n, b) => n + (b?.seat === seat ? (b.kind === 'city' ? 2 : 1) : 0), 0);
+  const buildings = r.buildings.reduce((n, b) => n + (b?.seat === seat ? (b.kind === 'city' ? 2 : 1) : 0), 0);
+  return buildings + (r.longestRoad === seat ? AWARD_POINTS : 0) + (r.largestArmy === seat ? AWARD_POINTS : 0);
+}
+
+/** Every point, including victory point cards only their owner has seen. */
+export function totalPoints(r: RulesState, seat: number): number {
+  return publicPoints(r, seat) + r.devCards[seat].filter((c) => c.card === 'point').length;
+}
+
+/** Whether `seat` holds a `card` bought before this turn. */
+export function canPlay(t: Table, seat: number, card: DevCard): boolean {
+  return t.rules.devCards[seat].some((c) => c.card === card && c.bought < t.game.turn);
+}
+
+export function roadLengths(t: Table): number[] {
+  const g = geometryOf(t.game);
+  return t.game.colors.map((_, seat) => longestRoad(t.rules, g, seat));
 }
 
 /** The best rate this seat gets when giving `give` to the bank: 4, 3 with a generic harbor, 2 with a matching one. */
@@ -266,8 +328,36 @@ export function setupNeed(t: Table, seat: number): 'settlement' | 'road' | null 
 
 const fail = (reason: string): Result => ({ ok: false, reason });
 
-/** Applies one player's action. Board actions are made on behalf of the current player. */
+/**
+ * Applies one player's action. Board actions are made on behalf of the current player. After
+ * every move the awards are brought up to date and the current player wins on reaching 10.
+ */
 export function apply(t: Table, seat: number, action: Action, roll: () => Dice = rollDice, random: Rng = cryptoRng): Result {
+  if (t.rules.winner !== null) return fail('The game is over');
+  const result = act(t, seat, action, roll, random);
+  if (!result.ok) return result;
+  const table = settle(result.table);
+  return table.rules.winner !== null ? { ...result, table, event: 'win' } : { ...result, table };
+}
+
+/** Longest Road after any change to roads or buildings, then whether the current player has won. */
+function settle(t: Table): Table {
+  let rules = t.rules;
+  if (rules.phase === 'main') {
+    const holder = awardHolder(rules.longestRoad, roadLengths(t), LONGEST_ROAD_MIN);
+    if (holder !== rules.longestRoad) {
+      const text = holder === null ? 'Nobody holds Longest Road now' : `${PLAYER_NAMES[t.game.colors[holder]]} takes Longest Road`;
+      rules = log({ ...rules, longestRoad: holder }, holder, text);
+    }
+    const seat = t.game.current;
+    if (totalPoints(rules, seat) >= WIN_POINTS) {
+      rules = log({ ...rules, winner: seat, pending: null, offer: null, robber: null }, seat, `${PLAYER_NAMES[t.game.colors[seat]]} wins!`);
+    }
+  }
+  return rules === t.rules ? t : { ...t, rules };
+}
+
+function act(t: Table, seat: number, action: Action, roll: () => Dice, random: Rng): Result {
   const r = t.rules;
   if (r.robber && !ROBBER_ACTIONS.has(action.type)) return fail(robberWait(t));
   const current = t.game.current;
@@ -302,15 +392,16 @@ export function apply(t: Table, seat: number, action: Action, roll: () => Dice =
       if (r.pending) return fail('Already building');
       if (r.offer) return fail('Finish the trade first');
       const need = setupNeed(t, seat);
+      const free = r.phase === 'main' && action.kind === 'road' && r.freeRoads > 0;
       if (r.phase === 'setup') {
         if (need !== action.kind) return fail(need ? `Place a ${need} now` : 'Not your step');
-      } else {
+      } else if (!free) {
         if (!r.rolled) return fail('Roll first');
         if (!covers(r.hands[seat], COSTS[action.kind])) return fail('Not enough cards');
       }
       if (piecesLeft(r, seat)[action.kind] <= 0) return fail(`No ${action.kind}s left`);
       if (!legalPlaces(t, seat, action.kind).length) return fail('Nowhere to build that');
-      return done({ ...t, rules: { ...r, pending: { kind: action.kind, at: null } } }, 'pending');
+      return done({ ...t, rules: { ...r, pending: { kind: action.kind, at: null, ...(free ? { free } : {}) } } }, 'pending');
     }
 
     case 'pick': {
@@ -327,7 +418,7 @@ export function apply(t: Table, seat: number, action: Action, roll: () => Dice =
     case 'confirm':
       if (isCurrent && r.robber?.stage === 'move' && r.robber.tile !== null) return placeThief(t, seat, r.robber.tile, random);
       if (!isCurrent || !r.pending || r.pending.at === null) return fail('Pick a spot first');
-      return place(t, seat, r.pending.kind, r.pending.at);
+      return place(t, seat, r.pending.kind, r.pending.at, !!r.pending.free);
 
     case 'undo':
       return undo(t, seat);
@@ -384,7 +475,10 @@ export function apply(t: Table, seat: number, action: Action, roll: () => Dice =
       if (r.phase !== 'main') return fail('Finish setup first');
       if (!r.rolled) return fail('Roll first');
       if (r.pending) return fail('Finish building first');
-      return done({ game: nextTurn(t.game), rules: { ...r, rolled: false, offer: null, lastBuild: null, lastSteal: null } }, 'turn');
+      return done(
+        { game: nextTurn(t.game), rules: { ...r, rolled: false, offer: null, lastBuild: null, lastSteal: null, playedDev: false, freeRoads: 0 } },
+        'turn',
+      );
     }
 
     case 'moveThief': {
@@ -430,8 +524,79 @@ export function apply(t: Table, seat: number, action: Action, roll: () => Dice =
         'robber',
       );
     }
+    case 'buyCard': {
+      if (!isCurrent) return fail('Not your turn');
+      if (r.phase !== 'main' || !r.rolled) return fail('Roll first');
+      if (r.pending) return fail('Finish building first');
+      if (!r.deck.length) return fail('No development cards left');
+      if (!covers(r.hands[seat], DEV_COST)) return fail('Not enough cards');
+      const deck = r.deck.slice();
+      const card = deck.pop()!;
+      const devCards = r.devCards.slice();
+      devCards[seat] = [...devCards[seat], { card, bought: t.game.turn }];
+      const rules = move({ ...r, deck, devCards, lastBuild: null }, seat, 'bank', DEV_COST);
+      return done({ ...t, rules: log(rules, seat, `${name} bought a development card`) }, 'card');
+    }
+
+    case 'playCard':
+      return playCard(t, seat, action);
   }
   return fail('Unknown action');
+}
+
+function playCard(t: Table, seat: number, action: Extract<Action, { type: 'playCard' }>): Result {
+  const r = t.rules;
+  const name = PLAYER_NAMES[t.game.colors[seat]];
+  if (seat !== t.game.current) return fail('Not your turn');
+  if (r.phase !== 'main') return fail('Finish setup first');
+  if (r.pending) return fail('Finish building first');
+  if (!['knight', 'roads', 'plenty', 'monopoly'].includes(action.card)) return fail('That card isn’t played');
+  if (r.playedDev) return fail('One development card a turn');
+  if (!r.devCards[seat].some((c) => c.card === action.card)) return fail('You don’t have that card');
+  if (!canPlay(t, seat, action.card)) return fail('Cards can’t be played the turn they’re bought');
+
+  // Plays the oldest copy, which is always one bought before this turn.
+  const held = r.devCards[seat].slice();
+  held.splice(held.findIndex((c) => c.card === action.card && c.bought < t.game.turn), 1);
+  const devCards = r.devCards.slice();
+  devCards[seat] = held;
+  let rules: RulesState = { ...r, devCards, playedDev: true, lastBuild: null };
+
+  switch (action.card) {
+    case 'knight': {
+      const knights = rules.knights.slice();
+      knights[seat]++;
+      const army = awardHolder(rules.largestArmy, knights, LARGEST_ARMY_MIN);
+      rules = { ...rules, knights, robber: { stage: 'move', owed: knights.map(() => 0), tile: null, victims: [], victim: null, order: [] } };
+      rules = log(rules, seat, `${name} played a knight`);
+      if (army !== r.largestArmy) rules = log({ ...rules, largestArmy: army }, seat, `${name} takes Largest Army`);
+      return done({ ...t, rules }, 'card');
+    }
+    case 'roads': {
+      const freeRoads = Math.min(2, piecesLeft(r, seat).road);
+      return done({ ...t, rules: log({ ...rules, freeRoads }, seat, `${name} played road building`) }, 'card');
+    }
+    case 'plenty': {
+      const take = action.take;
+      if (!Array.isArray(take) || take.length !== 2 || !take.every((res) => RESOURCES.includes(res))) return fail('Pick two cards');
+      const cards = hand();
+      for (const res of take) cards[res]++;
+      if (!covers(r.bank, cards)) return fail('The bank doesn’t have those');
+      rules = move(rules, 'bank', seat, cards);
+      return done({ ...t, rules: log(rules, seat, `${name} took ${take.map((res) => RESOURCE_NAMES[res]).join(' and ')} from the bank`) }, 'card');
+    }
+    case 'monopoly': {
+      const res = action.resource;
+      if (!res || !RESOURCES.includes(res)) return fail('Pick a card');
+      let taken = 0;
+      r.hands.forEach((h, other) => {
+        if (other === seat || !h[res]) return;
+        taken += h[res];
+        rules = move(rules, other, seat, hand({ [res]: h[res] }));
+      });
+      return done({ ...t, rules: log(rules, seat, `${name} took every ${RESOURCE_NAMES[res]} (${taken})`) }, 'card');
+    }
+  }
 }
 
 /** While the thief is out, only these moves are open; anything else waits. */
@@ -542,12 +707,12 @@ export function produce(t: Table, total: number): RulesState {
   return rules;
 }
 
-function place(t: Table, seat: number, kind: BuildKind, at: number): Result {
+function place(t: Table, seat: number, kind: BuildKind, at: number, free = false): Result {
   const r = t.rules;
   const name = PLAYER_NAMES[t.game.colors[seat]];
   if (!legalPlaces(t, seat, kind).includes(at)) return fail('Not a legal spot');
   const setup = r.phase === 'setup';
-  const paid = setup ? hand() : COSTS[kind];
+  const paid = setup || free ? hand() : COSTS[kind];
   if (!covers(r.hands[seat], paid)) return fail('Not enough cards');
 
   let rules: RulesState = move(r, seat, 'bank', paid);
@@ -563,7 +728,8 @@ function place(t: Table, seat: number, kind: BuildKind, at: number): Result {
   }
   rules = log({ ...rules, pending: null }, seat, `${name} built a ${kind}`);
 
-  if (!setup) return done({ ...t, rules: { ...rules, lastBuild: { seat, kind, at, paid, granted } } }, 'build');
+  if (free) rules = { ...rules, freeRoads: rules.freeRoads - 1 };
+  if (!setup) return done({ ...t, rules: { ...rules, lastBuild: { seat, kind, at, paid, granted, ...(free ? { free } : {}) } } }, 'build');
 
   let game = t.game;
   const players = t.game.colors.length;
@@ -602,7 +768,7 @@ function undo(t: Table, seat: number): Result {
   if (last.kind === 'road') {
     const roads = rules.roads.slice();
     roads[last.at] = null;
-    rules = { ...rules, roads };
+    rules = { ...rules, roads, freeRoads: rules.freeRoads + (last.free ? 1 : 0) };
   } else {
     const buildings = rules.buildings.slice();
     buildings[last.at] = last.kind === 'city' ? { seat, kind: 'settlement' } : null;
@@ -622,7 +788,7 @@ export function isRulesState(r: unknown, game: GameState): r is RulesState {
   const n = game.colors.length;
   const seatOk = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) < n;
   return (
-    s.version === 2 &&
+    s.version === 3 &&
     (s.phase === 'setup' || s.phase === 'main') &&
     Array.isArray(s.setupOrder) &&
     s.setupOrder.length === 2 * n &&
@@ -652,6 +818,18 @@ export function isRulesState(r: unknown, game: GameState): r is RulesState {
         Array.isArray(s.robber.victims) &&
         Array.isArray(s.robber.order))) &&
     (s.lastSteal === null || (typeof s.lastSteal === 'object' && RESOURCES.includes(s.lastSteal.card))) &&
+    Array.isArray(s.deck) &&
+    Array.isArray(s.devCards) &&
+    s.devCards.length === n &&
+    // Every development card is in the deck or a hand, or was played (and so can't come back).
+    s.deck.length + s.devCards.reduce((m, h) => m + h.length, 0) <= 25 &&
+    Array.isArray(s.knights) &&
+    s.knights.length === n &&
+    typeof s.playedDev === 'boolean' &&
+    Number.isInteger(s.freeRoads) &&
+    (s.longestRoad === null || seatOk(s.longestRoad)) &&
+    (s.largestArmy === null || seatOk(s.largestArmy)) &&
+    (s.winner === null || seatOk(s.winner)) &&
     Array.isArray(s.log)
   );
 }

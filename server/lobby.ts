@@ -2,7 +2,7 @@ import { rollDice } from '../src/game/dice';
 import { isGameState } from '../src/game/storage';
 import { createGame, type GameState, type NewGameOptions } from '../src/game/state';
 import type { BoardView, ClientMessage, PhoneView, SeatView, ServerMessage, TableEvent } from '../src/net/protocol';
-import { allowedFrom, phoneMe, publicRobber, publicRules } from '../src/net/views';
+import { allowedFrom, finalScores, phoneMe, publicRobber, publicRules } from '../src/net/views';
 import { apply, handSize, isRulesState, publicPoints, startTable, type Action, type RulesState } from '../src/rules/engine';
 
 /** One open connection: the board page or a phone. */
@@ -14,7 +14,7 @@ export interface Conn {
 
 /** What the server keeps on disk, so a restarted PC carries on with the same game and phones. */
 export interface SavedTable {
-  version: 2;
+  version: 3;
   id: string;
   started: boolean;
   game: GameState;
@@ -40,7 +40,7 @@ export function isSavedTable(t: unknown): t is SavedTable {
   if (typeof t !== 'object' || t === null) return false;
   const s = t as SavedTable;
   return (
-    s.version === 2 &&
+    s.version === 3 &&
     typeof s.id === 'string' &&
     typeof s.started === 'boolean' &&
     isGameState(s.game) &&
@@ -155,10 +155,13 @@ export class Lobby {
     if (msg.type === 'create') {
       if (!isNewGameOptions(msg.options)) return;
       // The digital game always draws the thief on the board.
-      const { game, rules } = startTable(createGame({ ...msg.options, thiefStyle: 'onscreen' }));
-      this.table = { version: 2, id: this.newId(), started: false, game, rules, keys: game.colors.map(() => null) };
+      const { game, rules } = startTable(createGame({ ...msg.options, thiefStyle: 'onscreen' }), this.opts.random);
+      const old = this.table;
+      // A rematch with the same seats keeps every phone where it is and skips the joining screen.
+      const same = !!msg.rematch && !!old && old.game.colors.join() === game.colors.join() && old.keys.every((k) => k !== null);
+      this.table = { version: 3, id: same ? old!.id : this.newId(), started: same, game, rules, keys: same ? old!.keys : game.colors.map(() => null) };
       this.rejoin.clear();
-      for (const c of this.conns) if (c.role === 'phone') c.seat = null;
+      if (!same) for (const c of this.conns) if (c.role === 'phone') c.seat = null;
       this.changed({ kind: 'new' });
       return;
     }
@@ -264,6 +267,11 @@ export class Lobby {
       robber: publicRobber(table),
       myOrder: seat !== null && t.rules.robber?.victim === seat ? t.rules.robber.order : null,
       stolen: seat !== null && t.rules.lastSteal && (t.rules.lastSteal.from === seat || t.rules.lastSteal.to === seat) ? t.rules.lastSteal : null,
+      knights: t.rules.knights,
+      longestRoad: t.rules.longestRoad,
+      largestArmy: t.rules.largestArmy,
+      winner: t.rules.winner,
+      final: finalScores(table),
       log: t.rules.log.slice(0, 8),
     };
   }

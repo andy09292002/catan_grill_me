@@ -1,6 +1,9 @@
 import {
   apply,
   bankRate,
+  canPlay,
+  roadLengths,
+  totalPoints,
   handSize,
   legalPlaces,
   piecesLeft,
@@ -32,6 +35,8 @@ const PHONE_ACTIONS = new Set<Action['type']>([
   'discard',
   'chooseVictim',
   'steal',
+  'buyCard',
+  'playCard',
 ]);
 
 /** Board actions are picks and ✓ / ✗ on the board, dice and Next turn; phones do the rest. */
@@ -56,6 +61,24 @@ export function publicRules(t: Table): PublicRules {
       at: r.pending.at,
     },
     robber: publicRobber(t),
+    devCards: r.devCards.map((h) => h.length),
+    deckLeft: r.deck.length,
+    knights: r.knights,
+    roadLengths: roadLengths(t),
+    longestRoad: r.longestRoad,
+    largestArmy: r.largestArmy,
+    winner: r.winner,
+    final: finalScores(t),
+  };
+}
+
+/** Everyone's points and victory point cards, once someone has won; null before that. */
+export function finalScores(t: Table): PublicRules['final'] {
+  const r = t.rules;
+  if (r.winner === null) return null;
+  return {
+    points: r.hands.map((_, s) => totalPoints(r, s)),
+    pointCards: r.devCards.map((h) => h.filter((c) => c.card === 'point').length),
   };
 }
 
@@ -78,6 +101,14 @@ export function phoneMe(t: Table, seat: number): PhoneMe {
     undo: works(t, seat, { type: 'undo' }),
     trade: mine && r.phase === 'main' && r.rolled && !r.pending && !r.robber,
     endTurn: works(t, seat, { type: 'endTurn' }),
+    buyCard: works(t, seat, { type: 'buyCard' }),
+    play: {
+      knight: works(t, seat, { type: 'playCard', card: 'knight' }),
+      roads: works(t, seat, { type: 'playCard', card: 'roads' }),
+      // Checked without the cards to take, which are chosen on the phone afterwards.
+      plenty: mine && r.phase === 'main' && !r.pending && !r.robber && !r.playedDev && canPlay(t, seat, 'plenty'),
+      monopoly: mine && r.phase === 'main' && !r.pending && !r.robber && !r.playedDev && canPlay(t, seat, 'monopoly'),
+    },
   };
   return {
     hand: r.hands[seat],
@@ -86,6 +117,9 @@ export function phoneMe(t: Table, seat: number): PhoneMe {
     rates: Object.fromEntries(RESOURCES.map((res) => [res, bankRate(t, seat, res)])) as Record<Resource, number>,
     setupNeed: setupNeed(t, seat),
     placing: mine && r.pending ? r.pending.kind : null,
+    devCards: r.devCards[seat].map((c) => ({ card: c.card, isNew: c.bought >= t.game.turn })),
+    freeRoads: mine ? r.freeRoads : 0,
+    totalPoints: totalPoints(r, seat),
     can,
   };
 }
