@@ -147,7 +147,7 @@ function announceSteal(v: PhoneView) {
       const c = card(r);
       if (i === s.index) c.classList.add('taken', 'leaving');
       return c;
-    });
+    }).reverse();
   }
   lastOrder = null;
   lastBacks = 0;
@@ -539,8 +539,8 @@ function robberOverlay(v: PhoneView) {
         'div',
         { class: 'sheet steal' },
         el('h2', {}, `${colorName(v, v.current)} is taking one of your cards`),
-        el('p', { class: 'hint' }, 'They see these face down, in this order.'),
-        el('div', { class: 'backs' }, ...v.myOrder.map((r) => card(r))),
+        el('p', { class: 'hint' }, 'They see these face down, as if you held them up facing them: their left is your right.'),
+        el('div', { class: 'backs' }, ...v.myOrder.map((r) => card(r)).reverse()),
       ),
     );
   }
